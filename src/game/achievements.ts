@@ -2,6 +2,7 @@ import { COUNTRIES } from "../data/countries";
 import { LANDMARKS } from "../data/landmarks";
 import { US_STATES } from "../data/usStates";
 import type { Region } from "../data/types";
+import { CAMPAIGN_REGIONS } from "./campaign";
 import { levelForXp } from "./progression";
 import type { SaveData } from "./storage";
 
@@ -110,6 +111,28 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: "race-wins-10", name: "Rival Crusher", icon: "\u{1F3C6}", description: "Win 10 races.", isUnlocked: (s) => s.raceWins >= 10 },
 
   { id: "collector", name: "Collector", icon: "\u{1F381}", description: "Reach the level that unlocks every skin and theme.", isUnlocked: (s) => levelForXp(s.xp).level >= 18 },
+
+  {
+    id: "campaign-boss-1",
+    name: "Boss Slayer",
+    icon: "\u{1F451}",
+    description: "Clear your first World Tour boss round.",
+    isUnlocked: (s) => CAMPAIGN_REGIONS.some((r) => (s.campaignStars[`${r}-boss`] ?? 0) >= 1),
+  },
+  {
+    id: "campaign-world-champion",
+    name: "World Tour Champion",
+    icon: "\u{1F3C6}",
+    description: "Clear every World Tour boss round.",
+    isUnlocked: (s) => CAMPAIGN_REGIONS.every((r) => (s.campaignStars[`${r}-boss`] ?? 0) >= 1),
+  },
+  {
+    id: "time-attack-20",
+    name: "Speed Demon",
+    icon: "⚡",
+    description: "Score 20 correct answers in one Time Attack run.",
+    isUnlocked: (s) => s.timeAttackBestCorrect >= 20,
+  },
 ];
 
 /** Achievements that just became unlocked by this save state and aren't recorded yet. */

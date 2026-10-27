@@ -34,6 +34,10 @@ export interface SaveData {
   unlockedAchievementIds: string[];
   hasSeenTutorial: boolean;
   accessibility: AccessibilitySettings;
+  /** Stars (0-3) earned per World Tour campaign level id, e.g. "Africa-boss". */
+  campaignStars: Record<string, number>;
+  timeAttackBestScore: number;
+  timeAttackBestCorrect: number;
 }
 
 function defaultSave(): SaveData {
@@ -56,6 +60,9 @@ function defaultSave(): SaveData {
     unlockedAchievementIds: [],
     hasSeenTutorial: false,
     accessibility: { largeText: false, colorBlindMode: false, reducedMotion: false },
+    campaignStars: {},
+    timeAttackBestScore: 0,
+    timeAttackBestCorrect: 0,
   };
 }
 

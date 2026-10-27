@@ -4,9 +4,9 @@ import { el, clear, chip } from "./ui/dom";
 import { getTargets, countryNameForTargetId, MODES, type Mode } from "./game/targets";
 import { buildRoundQueue, type QuestionFilter } from "./game/questions";
 import { buildDailyChallenge, dateKey, isNextDay } from "./game/daily";
-import { mulberry32 } from "./game/rng";
+import { mulberry32, shuffle } from "./game/rng";
 import { greatCircleDistanceKm } from "./game/geo";
-import { scoreAnswer, type AnswerScore } from "./game/scoring";
+import { scoreAnswer, type AnswerScore, type Rating } from "./game/scoring";
 import { levelForXp, xpForAnswer, newlyUnlockedForLevel, unlockedAtLevel, UNLOCKABLES } from "./game/progression";
 import {
   loadSave,
@@ -15,12 +15,34 @@ import {
   addLeaderboardEntry,
   type SaveData,
 } from "./game/storage";
-import { ROUND_LENGTH, RACE_ROUND_LENGTH, ANSWER_TIMEOUT_MS, MASTERY_RATINGS } from "./game/constants";
+import { ROUND_LENGTH, RACE_ROUND_LENGTH, ANSWER_TIMEOUT_MS, MASTERY_RATINGS, TIME_ATTACK_DURATION_MS } from "./game/constants";
 import * as sfx from "./game/sfx";
 import * as music from "./game/music";
 import { renderLearnedMap } from "./render/learnedMap";
 import { ACHIEVEMENTS, newlyUnlockedAchievements, type Achievement } from "./game/achievements";
+import {
+  buildCampaign,
+  levelsForRegion,
+  isLevelUnlocked,
+  isRegionUnlocked,
+  starsForRatings,
+  CAMPAIGN_REGIONS,
+  type CampaignLevel,
+} from "./game/campaign";
+import {
+  loadFamily,
+  saveFamily,
+  addProfile,
+  setActiveProfile,
+  removeProfile,
+  recordFamilyScore,
+  weeklyLeaderboard,
+} from "./game/family";
 import type { Difficulty, GeoTarget, Region } from "./data/types";
+
+function starString(n: number): string {
+  return "⭐".repeat(n) + "☆".repeat(Math.max(0, 3 - n));
+}
 
 const REGIONS: Region[] = ["Africa", "Asia", "Europe", "North America", "South America", "Oceania"];
 const DIFFICULTIES: { id: Difficulty; label: string }[] = [
@@ -45,7 +67,12 @@ type Screen =
   | "racePlaying"
   | "raceRoundResult"
   | "raceSummary"
-  | "tutorial";
+  | "tutorial"
+  | "worldTour"
+  | "campaignLevels"
+  | "timeAttackPlaying"
+  | "timeAttackResult"
+  | "family";
 
 interface TutorialStep {
   icon: string;
@@ -78,6 +105,20 @@ interface RoundState {
   questionStart: number;
   timeoutHandle: number | null;
   tickHandle: number | null;
+  /** Set when this round is a World Tour campaign level, so results can award stars. */
+  campaignLevelId: string | null;
+  ratings: Rating[];
+}
+
+interface TimeAttackState {
+  queue: GeoTarget[];
+  index: number;
+  score: number;
+  correct: number;
+  streak: number;
+  startTime: number;
+  tickHandle: number | null;
+  advanceHandle: number | null;
 }
 
 interface RaceState {
@@ -99,6 +140,9 @@ class GeoRacerApp {
   private pendingRegions: Region[] = [];
   private round: RoundState | null = null;
   private race: RaceState | null = null;
+  private timeAttack: TimeAttackState | null = null;
+  private timeAttackTimerFill: HTMLElement | null = null;
+  private timeAttackClockEl: HTMLElement | null = null;
   private lastResult: { target: GeoTarget; score: AnswerScore; mode: Mode } | null = null;
   private raceLastResult: { target: GeoTarget; scores: [AnswerScore, AnswerScore] } | null = null;
   private activeTapHandler: ((lat: number, lon: number) => void) | null = null;
@@ -297,12 +341,24 @@ class GeoRacerApp {
     this.globe.setAutoRotate(true);
     this.globe.clearPins();
     const level = levelForXp(this.save.xp);
+    const family = loadFamily();
+    const activeProfile = family.profiles.find((p) => p.id === family.activeProfileId);
     const panel = el("div", { class: "screen-center" }, [
       el("div", { class: "logo" }, ["GEO RACER"]),
       el("div", { class: "subtitle" }, [`Level ${level.level} explorer • ${this.save.xp} XP`]),
+      activeProfile
+        ? el("button", {
+            class: "chip",
+            style: "margin:0 auto 16px;",
+            onClick: () => this.renderFamilyLeaderboard(),
+          }, [`\u{1F46A} Playing as ${activeProfile.name}`])
+        : el("div"),
       el("button", { class: "btn btn-primary", onClick: () => this.renderModeSelect() }, ["✈️ Play"]),
       el("button", { class: "btn btn-accent", onClick: () => this.startDaily() }, ["\u{1F31F} Daily Challenge"]),
+      el("button", { class: "btn", onClick: () => this.renderWorldTour() }, ["\u{1F30E} World Tour"]),
+      el("button", { class: "btn", onClick: () => this.startTimeAttack() }, ["⏱️ Time Attack"]),
       el("button", { class: "btn", onClick: () => this.renderRaceSetup() }, ["\u{1F3C1} 2-Player Race"]),
+      el("button", { class: "btn", onClick: () => this.renderFamilyLeaderboard() }, ["\u{1F46A} Family Leaderboard"]),
       el("button", { class: "btn", onClick: () => this.renderLearned() }, ["\u{1F5FA}️ Learned Map"]),
       el("button", { class: "btn", onClick: () => this.renderStats() }, ["\u{1F3C6} Stats & Leaderboard"]),
       el("button", { class: "btn", onClick: () => this.renderAchievements() }, ["\u{1F396}️ Achievements"]),
@@ -402,6 +458,8 @@ class GeoRacerApp {
       questionStart: 0,
       timeoutHandle: null,
       tickHandle: null,
+      campaignLevelId: null,
+      ratings: [],
     };
     this.playCurrentQuestion();
   }
@@ -426,6 +484,30 @@ class GeoRacerApp {
       questionStart: 0,
       timeoutHandle: null,
       tickHandle: null,
+      campaignLevelId: null,
+      ratings: [],
+    };
+    this.playCurrentQuestion();
+  }
+
+  private startCampaignLevel(level: CampaignLevel): void {
+    const pool = getTargets("countries").filter((t) => level.countryIds.includes(t.id));
+    const rng = mulberry32(Date.now() & 0xffffffff);
+    const queue = shuffle(pool, rng);
+    this.round = {
+      mode: "countries",
+      difficulty: null,
+      isDaily: false,
+      queue,
+      index: 0,
+      score: 0,
+      streak: 0,
+      xpEarned: 0,
+      questionStart: 0,
+      timeoutHandle: null,
+      tickHandle: null,
+      campaignLevelId: level.id,
+      ratings: [],
     };
     this.playCurrentQuestion();
   }
@@ -503,6 +585,7 @@ class GeoRacerApp {
     const distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: target.lat, lon: target.lon });
     const difficulty = target.difficulty;
     const result = scoreAnswer(distanceKm, elapsedMs, difficulty, this.round.streak);
+    this.round.ratings.push(result.rating);
 
     this.round.streak = result.rating === "miss" ? 0 : this.round.streak + 1;
     this.round.score += result.totalPoints;
@@ -591,8 +674,7 @@ class GeoRacerApp {
       score: this.round.score,
       date: dateKey(),
     });
-    this.unlockAchievements();
-    saveSave(this.save);
+    this.recordFamilyScore(this.round.score);
 
     const leveledUp = after.level > before.level;
     if (leveledUp) sfx.playLevelUp();
@@ -600,6 +682,35 @@ class GeoRacerApp {
     const unlocks = leveledUp
       ? Array.from({ length: after.level - before.level }, (_, i) => newlyUnlockedForLevel(before.level + 1 + i)).flat()
       : [];
+
+    if (this.round.campaignLevelId) {
+      const level = buildCampaign().find((l) => l.id === this.round!.campaignLevelId)!;
+      const stars = starsForRatings(this.round.ratings);
+      const prevStars = this.save.campaignStars[level.id] ?? 0;
+      this.save.campaignStars = { ...this.save.campaignStars, [level.id]: Math.max(prevStars, stars) };
+      this.unlockAchievements();
+      saveSave(this.save);
+
+      const campaignSummary = el("div", { class: "screen-center" }, [
+        el("h2", {}, [level.isBoss ? "\u{1F451} Boss Defeated!" : "Level Complete!"]),
+        el("div", { class: "campaign-stars" }, [starString(stars)]),
+        el("div", { class: "score-line" }, [`${this.round.score} pts`]),
+        stars > prevStars ? el("p", {}, ["New best! ⭐"]) : el("div"),
+        leveledUp ? el("p", {}, [`Level up! You're now level ${after.level} \u{1F389}`]) : el("div"),
+        el("button", { class: "btn btn-primary", onClick: () => this.renderCampaignLevels(level.region) }, ["Continue"]),
+        el("button", { class: "btn", onClick: () => this.renderHome() }, ["\u{1F3E0} Home"]),
+      ]);
+      clear(this.uiContent);
+      this.uiContent.append(campaignSummary);
+      this.round = null;
+      this.setScreen("sessionSummary");
+      this.globe.clearPins();
+      this.globe.setAutoRotate(true);
+      return;
+    }
+
+    this.unlockAchievements();
+    saveSave(this.save);
 
     const summary = el("div", { class: "screen-center" }, [
       el("h2", {}, ["Round Complete!"]),
@@ -631,6 +742,255 @@ class GeoRacerApp {
     this.activeTapHandler = null;
     this.round = null;
     this.renderHome();
+  }
+
+  // ---------- WORLD TOUR CAMPAIGN ----------
+  private renderWorldTour(): void {
+    this.setScreen("worldTour");
+    this.globe.setAutoRotate(true);
+    this.globe.clearPins();
+    const campaign = buildCampaign();
+    const rows = CAMPAIGN_REGIONS.map((region) => {
+      const levels = campaign.filter((l) => l.region === region);
+      const stars = levels.reduce((sum, l) => sum + (this.save.campaignStars[l.id] ?? 0), 0);
+      const maxStars = levels.length * 3;
+      const unlocked = isRegionUnlocked(region, this.save.campaignStars);
+      return el("button", {
+        class: "btn btn-primary campaign-region-btn",
+        style: unlocked ? "" : "opacity:0.45;",
+        onClick: () => {
+          if (unlocked) this.renderCampaignLevels(region);
+        },
+      }, [
+        el("div", {}, [unlocked ? region : `\u{1F512} ${region}`]),
+        el("div", { class: "small-muted" }, [`${stars} / ${maxStars} ⭐`]),
+      ]);
+    });
+    const panel = el("div", { class: "screen-center" }, [
+      el("h2", {}, ["\u{1F30E} World Tour"]),
+      el("p", { class: "small-muted" }, ["Clear every level's boss round to unlock the next continent."]),
+      ...rows,
+      el("button", { class: "btn", onClick: () => this.renderHome() }, ["← Back"]),
+    ]);
+    clear(this.uiContent);
+    this.uiContent.append(panel);
+  }
+
+  private renderCampaignLevels(region: Region): void {
+    this.setScreen("campaignLevels");
+    const levels = levelsForRegion(region);
+    const rows = levels.map((lvl) => {
+      const unlocked = isLevelUnlocked(lvl, this.save.campaignStars);
+      const stars = this.save.campaignStars[lvl.id] ?? 0;
+      return el("button", {
+        class: `btn ${lvl.isBoss ? "btn-accent" : "btn-primary"} campaign-level-btn`,
+        style: unlocked ? "" : "opacity:0.45;",
+        onClick: () => {
+          if (unlocked) this.startCampaignLevel(lvl);
+        },
+      }, [
+        el("div", {}, [unlocked ? (lvl.isBoss ? `\u{1F451} ${lvl.label}` : lvl.label) : "\u{1F512} Locked"]),
+        unlocked ? el("div", { class: "small-muted" }, [starString(stars)]) : el("div"),
+      ]);
+    });
+    const panel = el("div", { class: "screen-center" }, [
+      el("h2", {}, [region]),
+      ...rows,
+      el("button", { class: "btn", onClick: () => this.renderWorldTour() }, ["← Back"]),
+    ]);
+    clear(this.uiContent);
+    this.uiContent.append(panel);
+  }
+
+  // ---------- TIME ATTACK ----------
+  private startTimeAttack(): void {
+    const pool = getTargets("countries");
+    const rng = mulberry32(Date.now() & 0xffffffff);
+    const queue = buildRoundQueue(pool, {}, 200, rng);
+    this.timeAttack = {
+      queue,
+      index: 0,
+      score: 0,
+      correct: 0,
+      streak: 0,
+      startTime: performance.now(),
+      tickHandle: null,
+      advanceHandle: null,
+    };
+    this.playTimeAttackQuestion();
+    this.timeAttack.tickHandle = window.setInterval(() => this.tickTimeAttackClock(), 100);
+  }
+
+  private tickTimeAttackClock(): void {
+    if (!this.timeAttack) return;
+    const elapsed = performance.now() - this.timeAttack.startTime;
+    const remaining = Math.max(0, TIME_ATTACK_DURATION_MS - elapsed);
+    const pct = remaining / TIME_ATTACK_DURATION_MS;
+    if (this.timeAttackTimerFill) this.timeAttackTimerFill.style.width = `${pct * 100}%`;
+    if (this.timeAttackClockEl) {
+      this.timeAttackClockEl.textContent = `${Math.ceil(remaining / 1000)}s`;
+      this.timeAttackClockEl.classList.toggle("low-time", remaining > 0 && remaining <= 10000);
+    }
+    if (remaining <= 0) this.finishTimeAttack();
+  }
+
+  private playTimeAttackQuestion(): void {
+    if (!this.timeAttack) return;
+    this.setScreen("timeAttackPlaying");
+    this.globe.setAutoRotate(false);
+    this.globe.clearPins();
+
+    const target = this.timeAttack.queue[this.timeAttack.index % this.timeAttack.queue.length];
+    const questionStart = performance.now();
+
+    const quitBtn = el("button", { class: "icon-btn", "aria-label": "Quit Time Attack", onClick: () => this.confirmQuitTimeAttack() }, ["✕"]);
+    const promptBanner = el("div", { class: "prompt-banner" }, [target.prompt]);
+    const scorePill = el("div", { class: "pill" }, [`Score ${this.timeAttack.score}`]);
+    const correctPill = el("div", { class: "pill" }, [`✓ ${this.timeAttack.correct}`]);
+    const clockPill = el("div", { class: "pill time-attack-clock" }, ["60s"]);
+    this.timeAttackClockEl = clockPill;
+
+    const hudTop = el("div", { class: "hud-top" }, [
+      quitBtn,
+      promptBanner,
+      el("div", { class: "hud-stats" }, [scorePill, correctPill, clockPill]),
+    ]);
+
+    const timerFill = el("div", { class: "timer-bar-fill", style: "width:100%;" });
+    this.timeAttackTimerFill = timerFill;
+    const timerTrack = el("div", { class: "timer-bar-track" }, [timerFill]);
+
+    clear(this.uiContent);
+    this.uiContent.append(hudTop, timerTrack);
+
+    this.activeTapHandler = (lat, lon) => this.submitTimeAttackAnswer(lat, lon, questionStart);
+  }
+
+  private submitTimeAttackAnswer(lat: number, lon: number, questionStart: number): void {
+    if (!this.timeAttack) return;
+    this.activeTapHandler = null;
+    const target = this.timeAttack.queue[this.timeAttack.index % this.timeAttack.queue.length];
+    const elapsedMs = performance.now() - questionStart;
+    const distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: target.lat, lon: target.lon });
+    const result = scoreAnswer(distanceKm, elapsedMs, target.difficulty, this.timeAttack.streak);
+
+    this.timeAttack.streak = result.rating === "miss" ? 0 : this.timeAttack.streak + 1;
+    this.timeAttack.score += result.totalPoints;
+    if (result.rating !== "miss") this.timeAttack.correct += 1;
+
+    this.globe.dropPin(lat, lon, result.rating === "miss" ? "miss" : "tap");
+    if (result.rating === "perfect") this.globe.burstConfetti(target.lat, target.lon);
+    this.playRatingSfx(result.rating, this.timeAttack.streak);
+
+    this.timeAttack.index += 1;
+    this.timeAttack.advanceHandle = window.setTimeout(() => {
+      if (!this.timeAttack) return;
+      const elapsed = performance.now() - this.timeAttack.startTime;
+      if (elapsed >= TIME_ATTACK_DURATION_MS) this.finishTimeAttack();
+      else this.playTimeAttackQuestion();
+    }, 300);
+  }
+
+  private confirmQuitTimeAttack(): void {
+    if (!this.timeAttack) return;
+    if (this.timeAttack.tickHandle) window.clearInterval(this.timeAttack.tickHandle);
+    if (this.timeAttack.advanceHandle) window.clearTimeout(this.timeAttack.advanceHandle);
+    this.activeTapHandler = null;
+    this.timeAttack = null;
+    this.renderHome();
+  }
+
+  private finishTimeAttack(): void {
+    if (!this.timeAttack) return;
+    if (this.timeAttack.tickHandle) window.clearInterval(this.timeAttack.tickHandle);
+    if (this.timeAttack.advanceHandle) window.clearTimeout(this.timeAttack.advanceHandle);
+    this.activeTapHandler = null;
+    const { score, correct } = this.timeAttack;
+
+    const isNewBest = score > this.save.timeAttackBestScore || correct > this.save.timeAttackBestCorrect;
+    this.save.timeAttackBestScore = Math.max(this.save.timeAttackBestScore, score);
+    this.save.timeAttackBestCorrect = Math.max(this.save.timeAttackBestCorrect, correct);
+    this.save.gamesPlayed += 1;
+    this.recordFamilyScore(score);
+    this.unlockAchievements();
+    saveSave(this.save);
+
+    const panel = el("div", { class: "screen-center" }, [
+      el("h2", {}, ["⏱️ Time's Up!"]),
+      el("div", { class: "score-line" }, [`${score} pts`]),
+      el("div", { class: "row-stat" }, [el("span", {}, ["Correct answers"]), el("span", {}, [`${correct}`])]),
+      el("div", { class: "row-stat" }, [el("span", {}, ["Best score"]), el("span", {}, [`${this.save.timeAttackBestScore}`])]),
+      el("div", { class: "row-stat" }, [el("span", {}, ["Best correct"]), el("span", {}, [`${this.save.timeAttackBestCorrect}`])]),
+      isNewBest ? el("div", { class: "fact-card" }, ["New personal best! \u{1F3C6}"]) : el("div"),
+      el("button", { class: "btn btn-primary", onClick: () => this.startTimeAttack() }, ["Play Again ⏱️"]),
+      el("button", { class: "btn", onClick: () => this.renderHome() }, ["\u{1F3E0} Home"]),
+    ]);
+    clear(this.uiContent);
+    this.uiContent.append(panel);
+    this.timeAttack = null;
+    this.setScreen("timeAttackResult");
+    this.globe.clearPins();
+    this.globe.setAutoRotate(true);
+  }
+
+  // ---------- FAMILY LEADERBOARD ----------
+  private recordFamilyScore(points: number): void {
+    const family = loadFamily();
+    if (!family.activeProfileId) return;
+    saveFamily(recordFamilyScore(family, family.activeProfileId, points));
+  }
+
+  private renderFamilyLeaderboard(): void {
+    this.setScreen("family");
+    this.globe.setAutoRotate(true);
+    const render = () => {
+      const family = loadFamily();
+      const board = weeklyLeaderboard(family);
+      const nameInput = el("input", { class: "btn", style: "text-align:center;", placeholder: "Family member's name" }) as HTMLInputElement;
+
+      const rows = board.map((p, i) => {
+        const isActive = p.id === family.activeProfileId;
+        return el("div", { class: `family-row ${isActive ? "active" : ""}` }, [
+          el("div", { class: "family-rank" }, [`${i + 1}`]),
+          el("div", { class: "family-name" }, [p.name]),
+          el("div", { class: "family-score" }, [`${p.weeklyScore}`]),
+          el("button", {
+            class: "btn", style: "margin:0; padding:6px 10px; width:auto; font-size:0.8rem;",
+            onClick: () => { saveFamily(setActiveProfile(family, p.id)); render(); },
+          }, [isActive ? "Playing" : "Play as"]),
+          el("button", {
+            class: "icon-btn", style: "width:32px; height:32px; min-height:32px; font-size:0.8rem;",
+            "aria-label": `Remove ${p.name}`,
+            onClick: () => {
+              if (confirm(`Remove ${p.name} from the family leaderboard?`)) {
+                saveFamily(removeProfile(family, p.id));
+                render();
+              }
+            },
+          }, ["✕"]),
+        ]);
+      });
+
+      const panel = el("div", { class: "screen-center" }, [
+        el("h2", {}, ["\u{1F46A} Family Leaderboard"]),
+        el("p", { class: "small-muted" }, ["Resets every week. Add everyone sharing this device!"]),
+        board.length > 0 ? el("div", { class: "family-list" }, rows) : el("p", { class: "small-muted" }, ["No players yet — add one below."]),
+        nameInput,
+        el("button", {
+          class: "btn btn-primary",
+          onClick: () => {
+            const name = nameInput.value.trim();
+            if (!name) return;
+            saveFamily(addProfile(family, name));
+            render();
+          },
+        }, ["+ Add Player"]),
+        el("button", { class: "btn", onClick: () => this.renderHome() }, ["← Back"]),
+      ]);
+      clear(this.uiContent);
+      this.uiContent.append(panel);
+    };
+    render();
   }
 
   // ---------- RACE MODE ----------

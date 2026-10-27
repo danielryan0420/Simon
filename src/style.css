@@ -521,6 +521,86 @@ table.leaderboard td {
   height: 0;
 }
 
+.campaign-region-btn,
+.campaign-level-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.campaign-stars {
+  font-size: 2rem;
+  letter-spacing: 4px;
+  margin: 6px 0;
+}
+
+.time-attack-clock {
+  font-variant-numeric: tabular-nums;
+}
+
+.time-attack-clock.low-time {
+  background: var(--danger);
+  color: #1a0303;
+  animation: pulse-warn 0.6s ease-in-out infinite;
+}
+
+@keyframes pulse-warn {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+
+.family-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 16px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.family-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(20, 35, 65, 0.6);
+  border-radius: 12px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.family-row.active {
+  background: rgba(56, 189, 248, 0.2);
+  border: 1px solid var(--accent);
+}
+
+.family-rank {
+  width: 20px;
+  font-weight: 800;
+  color: #6b7f9f;
+  flex-shrink: 0;
+}
+
+.family-name {
+  flex: 1;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.family-score {
+  font-weight: 800;
+  color: var(--accent-warm);
+  flex-shrink: 0;
+}
+
 @media (orientation: landscape) and (max-height: 500px) {
   .screen-center {
     padding: 14px 16px;

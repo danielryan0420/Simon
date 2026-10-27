@@ -13,6 +13,9 @@ describe("loadSave", () => {
     expect(data.leaderboard).toEqual([]);
     expect(data.hasSeenTutorial).toBe(false);
     expect(data.accessibility).toEqual({ largeText: false, colorBlindMode: false, reducedMotion: false });
+    expect(data.campaignStars).toEqual({});
+    expect(data.timeAttackBestScore).toBe(0);
+    expect(data.timeAttackBestCorrect).toBe(0);
   });
 
   it("round-trips through saveSave", () => {
@@ -38,6 +41,14 @@ describe("loadSave", () => {
     );
     const data = loadSave();
     expect(data.accessibility).toEqual({ largeText: true, colorBlindMode: false, reducedMotion: false });
+  });
+
+  it("backfills campaign and time attack defaults for saves written before they existed", () => {
+    localStorage.setItem("geo-racer:save:v1", JSON.stringify({ xp: 42 }));
+    const data = loadSave();
+    expect(data.campaignStars).toEqual({});
+    expect(data.timeAttackBestScore).toBe(0);
+    expect(data.timeAttackBestCorrect).toBe(0);
   });
 });
 
