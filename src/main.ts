@@ -11,9 +11,15 @@ import { levelForXp, xpForAnswer, newlyUnlockedForLevel, unlockedAtLevel, UNLOCK
 import {
   loadSave,
   saveSave,
+  deleteSave,
+  defaultSave,
   recordLearned,
   addLeaderboardEntry,
+  recordWeeklyScore,
+  loadSettings,
+  saveSettings,
   type SaveData,
+  type AppSettings,
 } from "./game/storage";
 import { ROUND_LENGTH, RACE_ROUND_LENGTH, ANSWER_TIMEOUT_MS, MASTERY_RATINGS, TIME_ATTACK_DURATION_MS } from "./game/constants";
 import * as sfx from "./game/sfx";
@@ -30,14 +36,20 @@ import {
   type CampaignLevel,
 } from "./game/campaign";
 import {
-  loadFamily,
-  saveFamily,
+  AVATARS,
+  PROFILE_COLORS,
+  loadProfiles,
+  saveProfiles,
   addProfile,
   setActiveProfile,
   removeProfile,
-  recordFamilyScore,
+  ensureActiveProfile,
+  nextAvatar,
+  nextColor,
   weeklyLeaderboard,
-} from "./game/family";
+  type ProfilesData,
+} from "./game/profiles";
+import { migrateLegacySave } from "./game/migration";
 import type { Difficulty, GeoTarget, Region } from "./data/types";
 
 function starString(n: number): string {
@@ -134,6 +146,9 @@ class GeoRacerApp {
   private uiContent: HTMLElement;
   private globe: GlobeScene;
   private save: SaveData;
+  private settings: AppSettings;
+  private profiles: ProfilesData;
+  private profileId: string;
   private screen: Screen = "home";
   private pendingMode: Mode = "countries";
   private pendingDifficulty: Difficulty = "rookie";
@@ -153,9 +168,14 @@ class GeoRacerApp {
   private tutorialRaf: number | null = null;
 
   constructor(globeRoot: HTMLElement, uiRoot: HTMLElement) {
-    this.save = loadSave();
+    migrateLegacySave();
+    this.profiles = ensureActiveProfile(loadProfiles());
+    saveProfiles(this.profiles);
+    this.profileId = this.profiles.activeProfileId!;
+    this.save = loadSave(this.profileId);
+    this.settings = loadSettings();
     this.globe = new GlobeScene(globeRoot, { onTap: (lat, lon) => this.activeTapHandler?.(lat, lon) });
-    this.globe.setTheme(this.save.selectedTheme);
+    this.globe.setTheme(this.settings.selectedTheme);
     this.applyAccessibility();
 
     const reducedMotionMedia = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -197,13 +217,13 @@ class GeoRacerApp {
     this.achievementToastRoot = el("div", { class: "achievement-toast-root" });
     document.body.append(this.achievementToastRoot);
 
-    if (this.save.hasSeenTutorial) this.renderHome();
+    if (this.settings.hasSeenTutorial) this.renderHome();
     else this.renderTutorial(0);
   }
 
   // ---------- ACCESSIBILITY ----------
   private applyAccessibility(): void {
-    const a11y = this.save.accessibility;
+    const a11y = this.settings.accessibility;
     document.documentElement.classList.toggle("a11y-large-text", a11y.largeText);
     document.documentElement.classList.toggle("a11y-colorblind", a11y.colorBlindMode);
     document.documentElement.classList.toggle("a11y-reduced-motion", a11y.reducedMotion);
@@ -225,7 +245,7 @@ class GeoRacerApp {
     this.clearTutorialTimers();
     const step = TUTORIAL_STEPS[stepIndex];
     const isLast = stepIndex + 1 >= TUTORIAL_STEPS.length;
-    const reduceMotion = this.save.accessibility.reducedMotion || systemPrefersReducedMotion();
+    const reduceMotion = this.settings.accessibility.reducedMotion || systemPrefersReducedMotion();
 
     const dots = el("div", { class: "chip-row", style: "margin:4px 0 16px;" }, TUTORIAL_STEPS.map((_, i) =>
       el("span", { style: `width:8px; height:8px; border-radius:50%; display:inline-block; background:${i === stepIndex ? "var(--accent)" : "rgba(255,255,255,0.25)"};` }, [])
@@ -269,8 +289,8 @@ class GeoRacerApp {
 
   private finishTutorial(): void {
     this.clearTutorialTimers();
-    this.save.hasSeenTutorial = true;
-    saveSave(this.save);
+    this.settings.hasSeenTutorial = true;
+    saveSettings(this.settings);
     this.renderHome();
   }
 
@@ -341,24 +361,28 @@ class GeoRacerApp {
     this.globe.setAutoRotate(true);
     this.globe.clearPins();
     const level = levelForXp(this.save.xp);
-    const family = loadFamily();
-    const activeProfile = family.profiles.find((p) => p.id === family.activeProfileId);
+    const xpPct = Math.min(100, Math.round((level.xpIntoLevel / level.xpForNextLevel) * 100));
+    const activeProfile = this.profiles.profiles.find((p) => p.id === this.profileId);
     const panel = el("div", { class: "screen-center" }, [
       el("div", { class: "logo" }, ["GEO RACER"]),
-      el("div", { class: "subtitle" }, [`Level ${level.level} explorer • ${this.save.xp} XP`]),
+      el("div", { class: "subtitle" }, [`Level ${level.level} explorer`]),
       activeProfile
         ? el("button", {
             class: "chip",
-            style: "margin:0 auto 16px;",
-            onClick: () => this.renderFamilyLeaderboard(),
-          }, [`\u{1F46A} Playing as ${activeProfile.name}`])
+            style: `margin:0 auto 10px; border-color:${activeProfile.color};`,
+            onClick: () => this.renderProfiles(),
+          }, [`${activeProfile.avatar} ${activeProfile.name}`])
         : el("div"),
+      el("div", { class: "xp-bar-wrap" }, [
+        el("div", { class: "xp-bar-track" }, [el("div", { class: "xp-bar-fill", style: `width:${xpPct}%;` })]),
+        el("div", { class: "small-muted" }, [`${level.xpIntoLevel} / ${level.xpForNextLevel} XP to level ${level.level + 1}`]),
+      ]),
       el("button", { class: "btn btn-primary", onClick: () => this.renderModeSelect() }, ["✈️ Play"]),
       el("button", { class: "btn btn-accent", onClick: () => this.startDaily() }, ["\u{1F31F} Daily Challenge"]),
       el("button", { class: "btn", onClick: () => this.renderWorldTour() }, ["\u{1F30E} World Tour"]),
       el("button", { class: "btn", onClick: () => this.startTimeAttack() }, ["⏱️ Time Attack"]),
       el("button", { class: "btn", onClick: () => this.renderRaceSetup() }, ["\u{1F3C1} 2-Player Race"]),
-      el("button", { class: "btn", onClick: () => this.renderFamilyLeaderboard() }, ["\u{1F46A} Family Leaderboard"]),
+      el("button", { class: "btn", onClick: () => this.renderProfiles() }, ["\u{1F46A} Family & Profiles"]),
       el("button", { class: "btn", onClick: () => this.renderLearned() }, ["\u{1F5FA}️ Learned Map"]),
       el("button", { class: "btn", onClick: () => this.renderStats() }, ["\u{1F3C6} Stats & Leaderboard"]),
       el("button", { class: "btn", onClick: () => this.renderAchievements() }, ["\u{1F396}️ Achievements"]),
@@ -599,7 +623,7 @@ class GeoRacerApp {
     }
 
     this.globe.dropPin(lat, lon, result.rating === "miss" ? "miss" : "tap");
-    this.globe.launchProjectile(lat, lon, target.lat, target.lon, this.save.selectedSkin).then(() => {
+    this.globe.launchProjectile(lat, lon, target.lat, target.lon, this.settings.selectedSkin).then(() => {
       this.globe.dropPin(target.lat, target.lon, "target");
       if (result.rating === "perfect" || result.rating === "great") {
         this.globe.burstConfetti(target.lat, target.lon);
@@ -674,7 +698,7 @@ class GeoRacerApp {
       score: this.round.score,
       date: dateKey(),
     });
-    this.recordFamilyScore(this.round.score);
+    this.save = recordWeeklyScore(this.save, this.round.score);
 
     const leveledUp = after.level > before.level;
     if (leveledUp) sfx.playLevelUp();
@@ -689,7 +713,7 @@ class GeoRacerApp {
       const prevStars = this.save.campaignStars[level.id] ?? 0;
       this.save.campaignStars = { ...this.save.campaignStars, [level.id]: Math.max(prevStars, stars) };
       this.unlockAchievements();
-      saveSave(this.save);
+      saveSave(this.profileId, this.save);
 
       const campaignSummary = el("div", { class: "screen-center" }, [
         el("h2", {}, [level.isBoss ? "\u{1F451} Boss Defeated!" : "Level Complete!"]),
@@ -710,7 +734,7 @@ class GeoRacerApp {
     }
 
     this.unlockAchievements();
-    saveSave(this.save);
+    saveSave(this.profileId, this.save);
 
     const summary = el("div", { class: "screen-center" }, [
       el("h2", {}, ["Round Complete!"]),
@@ -911,9 +935,9 @@ class GeoRacerApp {
     this.save.timeAttackBestScore = Math.max(this.save.timeAttackBestScore, score);
     this.save.timeAttackBestCorrect = Math.max(this.save.timeAttackBestCorrect, correct);
     this.save.gamesPlayed += 1;
-    this.recordFamilyScore(score);
+    this.save = recordWeeklyScore(this.save, score);
     this.unlockAchievements();
-    saveSave(this.save);
+    saveSave(this.profileId, this.save);
 
     const panel = el("div", { class: "screen-center" }, [
       el("h2", {}, ["⏱️ Time's Up!"]),
@@ -933,55 +957,99 @@ class GeoRacerApp {
     this.globe.setAutoRotate(true);
   }
 
-  // ---------- FAMILY LEADERBOARD ----------
-  private recordFamilyScore(points: number): void {
-    const family = loadFamily();
-    if (!family.activeProfileId) return;
-    saveFamily(recordFamilyScore(family, family.activeProfileId, points));
+  // ---------- FAMILY PROFILES & LEADERBOARD ----------
+  private switchProfile(id: string): void {
+    if (id === this.profileId) return;
+    this.profiles = setActiveProfile(this.profiles, id);
+    saveProfiles(this.profiles);
+    this.profileId = id;
+    this.save = loadSave(this.profileId);
   }
 
-  private renderFamilyLeaderboard(): void {
+  private renderProfiles(): void {
     this.setScreen("family");
     this.globe.setAutoRotate(true);
+    let pendingAvatar = nextAvatar(this.profiles);
+    let pendingColor = nextColor(this.profiles);
+
     const render = () => {
-      const family = loadFamily();
-      const board = weeklyLeaderboard(family);
+      const board = weeklyLeaderboard(this.profiles);
       const nameInput = el("input", { class: "btn", style: "text-align:center;", placeholder: "Family member's name" }) as HTMLInputElement;
 
+      const avatarRow = el("div", { class: "chip-row" }, AVATARS.map((a) =>
+        chip(a, pendingAvatar === a, () => { pendingAvatar = a; render(); })
+      ));
+      const colorRow = el("div", { class: "chip-row" }, PROFILE_COLORS.map((c) => {
+        const swatch = el("div", {
+          class: `color-swatch ${pendingColor === c ? "selected" : ""}`,
+          style: `background:${c};`,
+          role: "button",
+          tabindex: "0",
+          "aria-label": "Pick avatar color",
+          "aria-pressed": String(pendingColor === c),
+          onClick: () => { pendingColor = c; render(); },
+        }, []);
+        swatch.addEventListener("keydown", (e: KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            pendingColor = c;
+            render();
+          }
+        });
+        return swatch;
+      }));
+
       const rows = board.map((p, i) => {
-        const isActive = p.id === family.activeProfileId;
+        const isActive = p.id === this.profileId;
+        const profileLevel = levelForXp(loadSave(p.id).xp).level;
         return el("div", { class: `family-row ${isActive ? "active" : ""}` }, [
+          el("div", { class: "family-avatar", style: `background:${p.color};` }, [p.avatar]),
           el("div", { class: "family-rank" }, [`${i + 1}`]),
-          el("div", { class: "family-name" }, [p.name]),
+          el("div", { class: "family-name" }, [`${p.name} • Lv ${profileLevel}`]),
           el("div", { class: "family-score" }, [`${p.weeklyScore}`]),
           el("button", {
             class: "btn", style: "margin:0; padding:6px 10px; width:auto; font-size:0.8rem;",
-            onClick: () => { saveFamily(setActiveProfile(family, p.id)); render(); },
+            onClick: () => { this.switchProfile(p.id); render(); },
           }, [isActive ? "Playing" : "Play as"]),
-          el("button", {
-            class: "icon-btn", style: "width:32px; height:32px; min-height:32px; font-size:0.8rem;",
-            "aria-label": `Remove ${p.name}`,
-            onClick: () => {
-              if (confirm(`Remove ${p.name} from the family leaderboard?`)) {
-                saveFamily(removeProfile(family, p.id));
-                render();
-              }
-            },
-          }, ["✕"]),
+          board.length > 1
+            ? el("button", {
+                class: "icon-btn", style: "width:32px; height:32px; min-height:32px; font-size:0.8rem;",
+                "aria-label": `Remove ${p.name}`,
+                onClick: () => {
+                  if (confirm(`Remove ${p.name}? This deletes their progress.`)) {
+                    this.profiles = removeProfile(this.profiles, p.id);
+                    deleteSave(p.id);
+                    saveProfiles(this.profiles);
+                    if (this.profileId === p.id) {
+                      this.profileId = this.profiles.activeProfileId!;
+                      this.save = loadSave(this.profileId);
+                    }
+                    render();
+                  }
+                },
+              }, ["✕"])
+            : el("div"),
         ]);
       });
 
       const panel = el("div", { class: "screen-center" }, [
-        el("h2", {}, ["\u{1F46A} Family Leaderboard"]),
-        el("p", { class: "small-muted" }, ["Resets every week. Add everyone sharing this device!"]),
+        el("h2", {}, ["\u{1F46A} Family & Profiles"]),
+        el("p", { class: "small-muted" }, ["Weekly score resets every Monday. Each player keeps their own level, stars, and achievements."]),
         board.length > 0 ? el("div", { class: "family-list" }, rows) : el("p", { class: "small-muted" }, ["No players yet — add one below."]),
         nameInput,
+        el("div", { class: "small-muted" }, ["Pick an avatar"]),
+        avatarRow,
+        el("div", { class: "small-muted" }, ["Pick a color"]),
+        colorRow,
         el("button", {
           class: "btn btn-primary",
           onClick: () => {
             const name = nameInput.value.trim();
             if (!name) return;
-            saveFamily(addProfile(family, name));
+            this.profiles = addProfile(this.profiles, name, pendingAvatar, pendingColor);
+            saveProfiles(this.profiles);
+            pendingAvatar = nextAvatar(this.profiles);
+            pendingColor = nextColor(this.profiles);
             render();
           },
         }, ["+ Add Player"]),
@@ -1138,7 +1206,7 @@ class GeoRacerApp {
     this.save.racesPlayed += 1;
     if (s1 !== s2) this.save.raceWins += 1;
     this.unlockAchievements();
-    saveSave(this.save);
+    saveSave(this.profileId, this.save);
     const panel = el("div", { class: "screen-center" }, [
       el("h2", {}, ["Race Complete!"]),
       el("div", { class: "race-score-row" }, [
@@ -1226,11 +1294,11 @@ class GeoRacerApp {
       const skinChips = el("div", { class: "chip-row" }, UNLOCKABLES.filter((u) => u.kind === "skin").map((u) =>
         chip(
           unlockedIds.has(u.id) ? u.name : `\u{1F512} ${u.name}`,
-          this.save.selectedSkin === u.id,
+          this.settings.selectedSkin === u.id,
           () => {
             if (!unlockedIds.has(u.id)) return;
-            this.save.selectedSkin = u.id;
-            saveSave(this.save);
+            this.settings.selectedSkin = u.id;
+            saveSettings(this.settings);
             render();
           },
           unlockedIds.has(u.id) ? "" : "opacity:0.4;"
@@ -1240,23 +1308,23 @@ class GeoRacerApp {
       const themeChips = el("div", { class: "chip-row" }, UNLOCKABLES.filter((u) => u.kind === "theme").map((u) =>
         chip(
           unlockedIds.has(u.id) ? u.name : `\u{1F512} ${u.name}`,
-          this.save.selectedTheme === u.id,
+          this.settings.selectedTheme === u.id,
           () => {
             if (!unlockedIds.has(u.id)) return;
-            this.save.selectedTheme = u.id;
+            this.settings.selectedTheme = u.id;
             this.globe.setTheme(u.id);
-            saveSave(this.save);
+            saveSettings(this.settings);
             render();
           },
           unlockedIds.has(u.id) ? "" : "opacity:0.4;"
         )
       ));
 
-      const a11yToggle = (key: keyof SaveData["accessibility"], label: string) =>
-        chip(label, this.save.accessibility[key], () => {
-          this.save.accessibility = { ...this.save.accessibility, [key]: !this.save.accessibility[key] };
+      const a11yToggle = (key: keyof AppSettings["accessibility"], label: string) =>
+        chip(label, this.settings.accessibility[key], () => {
+          this.settings.accessibility = { ...this.settings.accessibility, [key]: !this.settings.accessibility[key] };
           this.applyAccessibility();
-          saveSave(this.save);
+          saveSettings(this.settings);
           render();
         });
 
@@ -1278,25 +1346,9 @@ class GeoRacerApp {
         el("button", {
           class: "btn",
           onClick: () => {
-            if (confirm("Reset all progress? This cannot be undone.")) {
-              this.save = {
-                ...loadSave(),
-                xp: 0,
-                learnedIds: [],
-                leaderboard: [],
-                gamesPlayed: 0,
-                bestStreak: 0,
-                lastDailyKey: null,
-                lastDailyScore: null,
-                perfectCount: 0,
-                greatCount: 0,
-                dailyCompletedCount: 0,
-                dailyStreak: 0,
-                racesPlayed: 0,
-                raceWins: 0,
-                unlockedAchievementIds: [],
-              };
-              saveSave(this.save);
+            if (confirm("Reset this profile's progress? This cannot be undone.")) {
+              this.save = defaultSave();
+              saveSave(this.profileId, this.save);
               render();
             }
           },

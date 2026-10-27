@@ -601,6 +601,51 @@ table.leaderboard td {
   flex-shrink: 0;
 }
 
+.family-avatar {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.color-swatch {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+}
+
+.color-swatch.selected {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.xp-bar-wrap {
+  margin: 0 0 16px;
+  text-align: center;
+}
+
+.xp-bar-track {
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.xp-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #3ddc84);
+  transition: width 0.3s ease-out;
+}
+
 @media (orientation: landscape) and (max-height: 500px) {
   .screen-center {
     padding: 14px 16px;
