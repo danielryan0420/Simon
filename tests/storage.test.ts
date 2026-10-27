@@ -25,6 +25,9 @@ describe("loadSave", () => {
     expect(data.timeAttackBestCorrect).toBe(0);
     expect(data.weeklyScore).toBe(0);
     expect(data.totalScore).toBe(0);
+    expect(data.detectiveCasesSolved).toBe(0);
+    expect(data.detectiveFlawlessSolves).toBe(0);
+    expect(data.detectiveBestScore).toBe(0);
   });
 
   it("round-trips through saveSave", () => {
@@ -43,6 +46,7 @@ describe("loadSave", () => {
     expect(data.timeAttackBestScore).toBe(0);
     expect(data.timeAttackBestCorrect).toBe(0);
     expect(data.weeklyScore).toBe(0);
+    expect(data.detectiveCasesSolved).toBe(0);
   });
 
   it("keeps each profile's save under its own storage key", () => {

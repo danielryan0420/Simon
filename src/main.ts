@@ -51,6 +51,16 @@ import {
   type ProfilesData,
 } from "./game/profiles";
 import { migrateLegacySave } from "./game/migration";
+import {
+  buildDetectiveCases,
+  CLUE_ORDER,
+  isCorrectGuess,
+  MAX_CLUES,
+  pointsForClues,
+  xpForCase,
+  type ClueKind,
+  type DetectiveCase,
+} from "./game/detective";
 import type { Difficulty, GeoTarget, Region } from "./data/types";
 
 function starString(n: number): string {
@@ -85,7 +95,10 @@ type Screen =
   | "campaignLevels"
   | "timeAttackPlaying"
   | "timeAttackResult"
-  | "family";
+  | "family"
+  | "detectivePlaying"
+  | "detectiveCaseResult"
+  | "detectiveSummary";
 
 interface TutorialStep {
   icon: string;
@@ -143,6 +156,17 @@ interface RaceState {
   questionStart: number;
 }
 
+interface DetectiveState {
+  queue: DetectiveCase[];
+  index: number;
+  cluesRevealed: number;
+  score: number;
+  xpEarned: number;
+  solvedCount: number;
+  flawlessCount: number;
+  advanceHandle: number | null;
+}
+
 class GeoRacerApp {
   private uiContent: HTMLElement;
   private globe: GlobeScene;
@@ -159,6 +183,8 @@ class GeoRacerApp {
   private timeAttack: TimeAttackState | null = null;
   private timeAttackTimerFill: HTMLElement | null = null;
   private timeAttackClockEl: HTMLElement | null = null;
+  private detective: DetectiveState | null = null;
+  private lastDetectiveResult: { detectiveCase: DetectiveCase; cluesRevealed: number; points: number } | null = null;
   private lastResult: { target: GeoTarget; score: AnswerScore; mode: Mode } | null = null;
   private raceLastResult: { target: GeoTarget; scores: [AnswerScore, AnswerScore] } | null = null;
   private activeTapHandler: ((lat: number, lon: number) => void) | null = null;
@@ -382,6 +408,7 @@ class GeoRacerApp {
       el("button", { class: "btn btn-accent", onClick: () => this.startDaily() }, ["\u{1F31F} Daily Challenge"]),
       el("button", { class: "btn", onClick: () => this.renderWorldTour() }, ["\u{1F30E} World Tour"]),
       el("button", { class: "btn", onClick: () => this.startTimeAttack() }, ["⏱️ Time Attack"]),
+      el("button", { class: "btn", onClick: () => this.startDetective() }, ["\u{1F575}️ Globe Detective"]),
       el("button", { class: "btn", onClick: () => this.renderRaceSetup() }, ["\u{1F3C1} 2-Player Race"]),
       el("button", { class: "btn", onClick: () => this.renderProfiles() }, ["\u{1F46A} Family & Profiles"]),
       el("button", { class: "btn", onClick: () => this.renderLearned() }, ["\u{1F5FA}️ Learned Map"]),
@@ -957,6 +984,198 @@ class GeoRacerApp {
     this.setScreen("timeAttackResult");
     this.globe.clearPins();
     this.globe.setAutoRotate(true);
+  }
+
+  // ---------- GLOBE DETECTIVE ----------
+  private startDetective(): void {
+    const pool = buildDetectiveCases();
+    const rng = mulberry32(Date.now() & 0xffffffff);
+    const queue = buildRoundQueue(pool, {}, ROUND_LENGTH, rng) as DetectiveCase[];
+    this.detective = {
+      queue,
+      index: 0,
+      cluesRevealed: 1,
+      score: 0,
+      xpEarned: 0,
+      solvedCount: 0,
+      flawlessCount: 0,
+      advanceHandle: null,
+    };
+    this.playDetectiveCase();
+  }
+
+  private clearDetectiveAdvanceTimer(): void {
+    if (this.detective?.advanceHandle) window.clearTimeout(this.detective.advanceHandle);
+    if (this.detective) this.detective.advanceHandle = null;
+  }
+
+  private playDetectiveCase(): void {
+    if (!this.detective) return;
+    this.setScreen("detectivePlaying");
+    this.globe.setAutoRotate(false);
+    this.globe.clearPins();
+
+    const detectiveCase = this.detective.queue[this.detective.index];
+    const revealed = CLUE_ORDER.slice(0, this.detective.cluesRevealed);
+
+    const quitBtn = el("button", { class: "icon-btn", "aria-label": "Quit Globe Detective", onClick: () => this.confirmQuitDetective() }, ["✕"]);
+    const clueBanner = el("div", { class: "prompt-banner detective-clue-banner" }, [
+      el("div", { class: "small-muted" }, [`Case ${this.detective.index + 1} / ${this.detective.queue.length} • Clue ${this.detective.cluesRevealed}/${MAX_CLUES}`]),
+      el("ul", { class: "clue-list" }, revealed.map((kind) => el("li", {}, [detectiveCase.clues[kind as ClueKind]]))),
+    ]);
+    const scorePill = el("div", { class: "pill" }, [`Score ${this.detective.score}`]);
+    const solvedPill = el("div", { class: "pill" }, [`\u{1F50E} ${this.detective.solvedCount}`]);
+
+    const hudTop = el("div", { class: "hud-top" }, [
+      quitBtn,
+      clueBanner,
+      el("div", { class: "hud-stats" }, [scorePill, solvedPill]),
+    ]);
+
+    const canRevealMore = this.detective.cluesRevealed < MAX_CLUES;
+    const hintBtn = el("button", {
+      class: "btn",
+      disabled: canRevealMore ? undefined : "true",
+      style: "pointer-events:auto; width:auto; margin:0; padding:8px 16px;",
+      onClick: () => this.revealDetectiveHint(),
+    }, [canRevealMore ? "\u{1F4A1} Need a hint?" : "No more hints left"]);
+
+    const progress = el("div", { class: "hud-bottom" }, [
+      el("div", { class: "pill" }, [`Tap the globe to guess`]),
+      hintBtn,
+    ]);
+
+    clear(this.uiContent);
+    this.uiContent.append(hudTop, progress);
+
+    sfx.playUiOpen();
+    this.activeTapHandler = (lat, lon) => this.submitDetectiveGuess(lat, lon);
+  }
+
+  private revealDetectiveHint(): void {
+    if (!this.detective) return;
+    if (this.detective.cluesRevealed >= MAX_CLUES) return;
+    this.detective.cluesRevealed += 1;
+    this.playDetectiveCase();
+  }
+
+  private submitDetectiveGuess(lat: number, lon: number): void {
+    if (!this.detective) return;
+    const detectiveCase = this.detective.queue[this.detective.index];
+    const distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: detectiveCase.lat, lon: detectiveCase.lon });
+
+    if (isCorrectGuess(distanceKm)) {
+      this.activeTapHandler = null;
+      const cluesRevealed = this.detective.cluesRevealed;
+      const points = pointsForClues(cluesRevealed, detectiveCase.difficulty);
+      const xp = xpForCase(points);
+      this.detective.score += points;
+      this.detective.xpEarned += xp;
+      this.detective.solvedCount += 1;
+      if (cluesRevealed === 1) this.detective.flawlessCount += 1;
+      this.save = recordLearned(this.save, detectiveCase.id);
+
+      this.globe.dropPin(lat, lon, "tap");
+      this.globe.dropPin(detectiveCase.lat, detectiveCase.lon, "target");
+      this.globe.burstConfetti(detectiveCase.lat, detectiveCase.lon);
+      sfx.playPerfect();
+      this.globe.flyTo(detectiveCase.lat, detectiveCase.lon, 1.7, 1200);
+
+      this.lastDetectiveResult = { detectiveCase, cluesRevealed, points };
+      this.detective.advanceHandle = window.setTimeout(() => this.renderDetectiveCaseResult(true), 650);
+      return;
+    }
+
+    this.globe.dropPin(lat, lon, "miss");
+    sfx.playMiss();
+
+    if (this.detective.cluesRevealed < MAX_CLUES) {
+      this.activeTapHandler = null;
+      this.detective.advanceHandle = window.setTimeout(() => {
+        if (!this.detective) return;
+        this.detective.cluesRevealed += 1;
+        this.playDetectiveCase();
+      }, 500);
+      return;
+    }
+
+    // Out of clues and still wrong: the case goes unsolved.
+    this.activeTapHandler = null;
+    this.lastDetectiveResult = { detectiveCase, cluesRevealed: this.detective.cluesRevealed, points: 0 };
+    this.detective.advanceHandle = window.setTimeout(() => this.renderDetectiveCaseResult(false), 500);
+  }
+
+  private renderDetectiveCaseResult(solved: boolean): void {
+    if (!this.detective || !this.lastDetectiveResult) return;
+    this.setScreen("detectiveCaseResult");
+    const { detectiveCase, cluesRevealed, points } = this.lastDetectiveResult;
+
+    const panel = el("div", { class: "result-card" }, [
+      el("div", { class: `rating-badge ${solved ? "rating-perfect" : "rating-miss"}` }, [solved ? "CASE SOLVED" : "CASE CLOSED"]),
+      el("div", { class: "score-line" }, [`+${points}`]),
+      el("div", { class: "row-stat" }, [el("span", {}, ["Clues used"]), el("span", {}, [`${cluesRevealed} / ${MAX_CLUES}`])]),
+      el("div", { class: "fact-card" }, [el("strong", {}, [detectiveCase.name]), el("div", {}, [detectiveCase.fact])]),
+      el("button", {
+        class: "btn btn-primary",
+        onClick: () => this.nextDetectiveCase(),
+      }, [this.detective.index + 1 < this.detective.queue.length ? "Next Case →" : "Finish →"]),
+    ]);
+    clear(this.uiContent);
+    this.uiContent.append(panel);
+  }
+
+  private nextDetectiveCase(): void {
+    if (!this.detective) return;
+    this.detective.index += 1;
+    this.detective.cluesRevealed = 1;
+    if (this.detective.index >= this.detective.queue.length) {
+      this.finishDetective();
+    } else {
+      this.playDetectiveCase();
+    }
+  }
+
+  private finishDetective(): void {
+    if (!this.detective) return;
+    const { score, xpEarned, solvedCount, flawlessCount } = this.detective;
+    const before = levelForXp(this.save.xp);
+    this.save.xp += xpEarned;
+    this.save.gamesPlayed += 1;
+    const after = levelForXp(this.save.xp);
+    this.save.detectiveCasesSolved += solvedCount;
+    this.save.detectiveFlawlessSolves += flawlessCount;
+    this.save.detectiveBestScore = Math.max(this.save.detectiveBestScore, score);
+    this.save = recordWeeklyScore(this.save, score);
+
+    const leveledUp = after.level > before.level;
+    if (leveledUp) sfx.playLevelUp();
+    this.unlockAchievements();
+    saveSave(this.profileId, this.save);
+
+    const panel = el("div", { class: "screen-center" }, [
+      el("h2", {}, ["\u{1F575}️ Case Files Closed"]),
+      el("div", { class: "score-line" }, [`${score} pts`]),
+      el("div", { class: "row-stat" }, [el("span", {}, ["Cases solved"]), el("span", {}, [`${solvedCount} / ${this.detective.queue.length}`])]),
+      el("div", { class: "row-stat" }, [el("span", {}, ["Solved on first clue"]), el("span", {}, [`${flawlessCount}`])]),
+      el("div", { class: "row-stat" }, [el("span", {}, ["XP earned"]), el("span", {}, [`+${xpEarned}`])]),
+      leveledUp ? el("div", { class: "fact-card" }, [el("strong", {}, [`Level up! You're now level ${after.level} \u{1F389}`])]) : el("div"),
+      el("button", { class: "btn btn-primary", onClick: () => this.startDetective() }, ["Play Again \u{1F50E}"]),
+      el("button", { class: "btn", onClick: () => this.renderHome() }, ["\u{1F3E0} Home"]),
+    ]);
+    clear(this.uiContent);
+    this.uiContent.append(panel);
+    this.detective = null;
+    this.setScreen("detectiveSummary");
+    this.globe.clearPins();
+    this.globe.setAutoRotate(true);
+  }
+
+  private confirmQuitDetective(): void {
+    if (!this.detective) return;
+    this.clearDetectiveAdvanceTimer();
+    this.activeTapHandler = null;
+    this.detective = null;
+    this.renderHome();
   }
 
   // ---------- FAMILY PROFILES & LEADERBOARD ----------

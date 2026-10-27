@@ -53,4 +53,18 @@ describe("newlyUnlockedAchievements", () => {
     const save = { ...defaultSave(), learnedIds: europeIds };
     expect(newlyUnlockedAchievements(save).map((a) => a.id)).toContain("region-champion");
   });
+
+  it("unlocks Globe Detective achievements based on cases solved and flawless solves", () => {
+    const firstCase = { ...defaultSave(), detectiveCasesSolved: 1 };
+    expect(newlyUnlockedAchievements(firstCase).map((a) => a.id)).toContain("detective-1");
+
+    const notYetMaster = { ...defaultSave(), detectiveCasesSolved: 24 };
+    expect(newlyUnlockedAchievements(notYetMaster).map((a) => a.id)).not.toContain("detective-25");
+
+    const master = { ...defaultSave(), detectiveCasesSolved: 25 };
+    expect(newlyUnlockedAchievements(master).map((a) => a.id)).toContain("detective-25");
+
+    const flawless = { ...defaultSave(), detectiveFlawlessSolves: 10 };
+    expect(newlyUnlockedAchievements(flawless).map((a) => a.id)).toContain("detective-flawless-10");
+  });
 });

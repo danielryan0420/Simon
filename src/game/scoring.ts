@@ -12,7 +12,7 @@ const RATING_THRESHOLDS_KM: { rating: Rating; maxKm: number }[] = [
 /** Distance beyond which an answer always scores zero accuracy points. */
 export const MISS_DISTANCE_KM = 3000;
 
-const DIFFICULTY_MULTIPLIER: Record<Difficulty, number> = {
+export const DIFFICULTY_MULTIPLIER: Record<Difficulty, number> = {
   rookie: 1,
   pilot: 1.25,
   ace: 1.5,

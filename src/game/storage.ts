@@ -59,6 +59,10 @@ export interface SaveData {
   campaignStars: Record<string, number>;
   timeAttackBestScore: number;
   timeAttackBestCorrect: number;
+  /** Globe Detective: total cases solved, how many were solved on the very first clue, and best single-round score. */
+  detectiveCasesSolved: number;
+  detectiveFlawlessSolves: number;
+  detectiveBestScore: number;
   /** Family weekly leaderboard: resets every ISO week (see isoWeekKey). */
   weeklyScore: number;
   weekKey: string;
@@ -85,6 +89,9 @@ export function defaultSave(): SaveData {
     campaignStars: {},
     timeAttackBestScore: 0,
     timeAttackBestCorrect: 0,
+    detectiveCasesSolved: 0,
+    detectiveFlawlessSolves: 0,
+    detectiveBestScore: 0,
     weeklyScore: 0,
     weekKey: isoWeekKey(),
     bestWeeklyScore: 0,

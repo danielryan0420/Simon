@@ -133,6 +133,28 @@ export const ACHIEVEMENTS: Achievement[] = [
     description: "Score 20 correct answers in one Time Attack run.",
     isUnlocked: (s) => s.timeAttackBestCorrect >= 20,
   },
+
+  {
+    id: "detective-1",
+    name: "Rookie Detective",
+    icon: "\u{1F50E}",
+    description: "Crack your first Globe Detective case.",
+    isUnlocked: (s) => s.detectiveCasesSolved >= 1,
+  },
+  {
+    id: "detective-25",
+    name: "Master Detective",
+    icon: "\u{1F575}️",
+    description: "Solve 25 Globe Detective cases.",
+    isUnlocked: (s) => s.detectiveCasesSolved >= 25,
+  },
+  {
+    id: "detective-flawless-10",
+    name: "One-Clue Wonder",
+    icon: "\u{1F9E0}",
+    description: "Solve 10 Globe Detective cases using only the first clue.",
+    isUnlocked: (s) => s.detectiveFlawlessSolves >= 10,
+  },
 ];
 
 /** Achievements that just became unlocked by this save state and aren't recorded yet. */
