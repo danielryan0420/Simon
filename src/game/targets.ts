@@ -1,15 +1,17 @@
 import { COUNTRIES } from "../data/countries";
 import { LANDMARKS } from "../data/landmarks";
 import { US_STATES } from "../data/usStates";
+import { flagSvgFor } from "../data/flags";
 import type { GeoTarget } from "../data/types";
 
-export type Mode = "countries" | "capitals" | "landmarks" | "states";
+export type Mode = "countries" | "capitals" | "landmarks" | "states" | "flags";
 
 export const MODES: { id: Mode; label: string }[] = [
   { id: "countries", label: "Countries" },
   { id: "capitals", label: "Capitals" },
   { id: "landmarks", label: "Landmarks" },
   { id: "states", label: "US States" },
+  { id: "flags", label: "Flags" },
 ];
 
 export function getTargets(mode: Mode): GeoTarget[] {
@@ -58,6 +60,18 @@ export function getTargets(mode: Mode): GeoTarget[] {
         difficulty: s.difficulty,
         fact: s.fact,
       }));
+    case "flags":
+      return COUNTRIES.map((c) => ({
+        id: `${c.id}-flag`,
+        name: c.country,
+        prompt: "Which country does this flag belong to?",
+        lat: c.lat,
+        lon: c.lon,
+        region: c.region,
+        difficulty: c.difficulty,
+        fact: c.fact,
+        promptImage: flagSvgFor(c.id) ?? undefined,
+      }));
   }
 }
 
@@ -68,6 +82,10 @@ export function countryNameForTargetId(mode: Mode, targetId: string): string | n
   }
   if (mode === "capitals") {
     const countryId = targetId.replace(/-capital$/, "");
+    return COUNTRIES.find((c) => c.id === countryId)?.country ?? null;
+  }
+  if (mode === "flags") {
+    const countryId = targetId.replace(/-flag$/, "");
     return COUNTRIES.find((c) => c.id === countryId)?.country ?? null;
   }
   return null;

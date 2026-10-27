@@ -10,6 +10,13 @@ export function dateKey(date: Date = new Date()): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** Whether `key` is exactly one calendar day after `prevKey` (both YYYY-MM-DD, UTC). */
+export function isNextDay(prevKey: string, key: string): boolean {
+  const prev = new Date(`${prevKey}T00:00:00Z`).getTime();
+  const next = new Date(`${key}T00:00:00Z`).getTime();
+  return next - prev === 24 * 60 * 60 * 1000;
+}
+
 /** The daily challenge mixes every mode's targets so it always feels fresh. */
 export function buildDailyChallenge(
   allTargetsByMode: Record<Mode, GeoTarget[]>,

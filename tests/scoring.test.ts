@@ -73,7 +73,9 @@ describe("scoreAnswer", () => {
   it("scales with difficulty", () => {
     const rookie = scoreAnswer(100, 3000, "rookie", 2);
     const ace = scoreAnswer(100, 3000, "ace", 2);
+    const hard = scoreAnswer(100, 3000, "hard", 2);
     expect(ace.totalPoints).toBeGreaterThan(rookie.totalPoints);
+    expect(hard.totalPoints).toBeGreaterThan(ace.totalPoints);
   });
 
   it("scales with streak via combo multiplier", () => {

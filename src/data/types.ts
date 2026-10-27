@@ -6,7 +6,7 @@ export type Region =
   | "South America"
   | "Oceania";
 
-export type Difficulty = "rookie" | "pilot" | "ace";
+export type Difficulty = "rookie" | "pilot" | "ace" | "hard";
 
 export interface CountryEntry {
   id: string;
@@ -55,4 +55,6 @@ export interface GeoTarget {
   region: Region;
   difficulty: Difficulty;
   fact: string;
+  /** Inline SVG markup shown above the prompt instead of/alongside text, used by Flags mode. */
+  promptImage?: string;
 }

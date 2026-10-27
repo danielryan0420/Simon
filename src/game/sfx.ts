@@ -14,8 +14,8 @@ function loadMuted(): boolean {
   }
 }
 
-function getCtx(): AudioContext | null {
-  if (muted) return null;
+/** Shared AudioContext, also used by music.ts so iOS Safari only needs one gesture unlock. */
+export function getAudioContext(): AudioContext | null {
   if (!ctx) {
     const Ctor = window.AudioContext || (window as any).webkitAudioContext;
     if (!Ctor) return null;
@@ -23,6 +23,11 @@ function getCtx(): AudioContext | null {
   }
   if (ctx.state === "suspended") void ctx.resume();
   return ctx;
+}
+
+function getCtx(): AudioContext | null {
+  if (muted) return null;
+  return getAudioContext();
 }
 
 export function isMuted(): boolean {
@@ -150,4 +155,10 @@ export function playLevelUp(): void {
 
 export function playUiOpen(): void {
   sweep(440, 660, 0.1, "triangle", 0.1);
+}
+
+export function playAchievement(): void {
+  tone(660, 0.1, "sine", 0.18);
+  tone(880, 0.1, "sine", 0.18, 0.09);
+  tone(1320, 0.28, "sine", 0.2, 0.18);
 }

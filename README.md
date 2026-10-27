@@ -27,8 +27,8 @@ repo settings — this repo does not enable it automatically).
 ## How to play
 
 1. Pick **Play**, choose a mode (Countries / Capitals / Landmarks / US
-   States) and a difficulty (Rookie / Pilot / Ace), optionally filtering by
-   region.
+   States / Flags) and a difficulty (Rookie / Pilot / Ace / Hard — Hard adds
+   tricky, lesser-known World Capitals), optionally filtering by region.
 2. Read the prompt (e.g. "Fly to: Kenya"), then drag to spin the globe and
    **tap/click** the spot you think is correct.
 3. A little plane flies to your pin and the game scores you on distance
@@ -39,8 +39,11 @@ repo settings — this repo does not enable it automatically).
    plane/rocket skins and globe themes.
 5. Try the **Daily Challenge** (same 10 questions for everyone, once per
    day), or pass the device for a **2-player hot-seat Race**. Check your
-   **Learned Map** to see which countries you've mastered, and your **Stats
-   & Leaderboard** for personal bests (all stored locally in your browser).
+   **Learned Map** to see which countries you've mastered, your **Stats &
+   Leaderboard** for personal bests, and **Achievements** for 25+ badges to
+   unlock (all stored locally in your browser). Toggle sound effects and
+   background music independently with the two buttons in the top-right
+   corner.
 
 Works offline after the first load (installable as a home-screen app on
 iPhone/Android via the PWA manifest + service worker) and is mobile-first:

@@ -41,12 +41,23 @@ modifications beyond resizing were made upstream; files are used unmodified.
   rasterized locally. No external icon assets used. Released under the same
   license as this repository.
 
-## Sound effects
+## Flags (Flags mode, `src/data/flagSpecs.ts` + `src/render/flagSvg.ts`)
 
-- All sound effects are synthesized at runtime with the Web Audio API
-  (oscillators/noise + envelopes) in `src/game/sfx.ts` — no audio files are
+- Flag artwork is generated at runtime from small declarative specs (stripes,
+  cantons, stars, circles, simple polygons) rather than traced from any
+  third-party flag image set. National flag designs are official government
+  symbols and not subject to copyright, so these are original, simplified
+  vector reproductions authored for this project — no external SVG files or
+  icon packs are bundled.
+
+## Sound effects & music
+
+- All sound effects (`src/game/sfx.ts`) and the optional background music
+  (`src/game/music.ts`, toggleable in-game) are synthesized at runtime with
+  the Web Audio API (oscillators/noise + envelopes) — no audio files are
   bundled, so there is nothing third-party to credit, and there is zero
-  network dependency for audio.
+  network dependency for audio. This also sidesteps any CC0/attribution
+  licensing concerns entirely, since no third-party audio asset is shipped.
 
 ## Fonts
 

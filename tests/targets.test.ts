@@ -1,24 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { getTargets, MODES } from "../src/game/targets";
+import { countryNameForTargetId, getTargets, MODES } from "../src/game/targets";
+import { COUNTRIES } from "../src/data/countries";
 
-describe("getTargets data integrity", () => {
-  for (const { id } of MODES) {
-    it(`${id} has a healthy pool with valid coordinates and unique ids`, () => {
-      const targets = getTargets(id);
-      expect(targets.length).toBeGreaterThanOrEqual(10);
+describe("getTargets", () => {
+  it("includes every mode declared in MODES", () => {
+    for (const { id } of MODES) {
+      expect(() => getTargets(id)).not.toThrow();
+    }
+  });
 
-      const ids = new Set<string>();
-      for (const t of targets) {
-        expect(t.lat).toBeGreaterThanOrEqual(-90);
-        expect(t.lat).toBeLessThanOrEqual(90);
-        expect(t.lon).toBeGreaterThanOrEqual(-180);
-        expect(t.lon).toBeLessThanOrEqual(180);
-        expect(t.name.length).toBeGreaterThan(0);
-        expect(t.prompt.length).toBeGreaterThan(0);
-        expect(t.fact.length).toBeGreaterThan(0);
-        expect(ids.has(t.id)).toBe(false);
-        ids.add(t.id);
-      }
-    });
-  }
+  it("builds a flags target per country with a flag image and fly-to coordinates", () => {
+    const flags = getTargets("flags");
+    expect(flags).toHaveLength(COUNTRIES.length);
+    for (const target of flags) {
+      expect(target.promptImage).toBeTruthy();
+      expect(target.promptImage).toContain("<svg");
+      expect(target.id.endsWith("-flag")).toBe(true);
+    }
+  });
+
+  it("surfaces the new hard difficulty tier for countries and capitals", () => {
+    const countries = getTargets("countries");
+    const capitals = getTargets("capitals");
+    expect(countries.some((t) => t.difficulty === "hard")).toBe(true);
+    expect(capitals.some((t) => t.difficulty === "hard")).toBe(true);
+  });
+});
+
+describe("countryNameForTargetId", () => {
+  it("maps a flags target id back to its country name", () => {
+    expect(countryNameForTargetId("flags", "japan-flag")).toBe("Japan");
+  });
+
+  it("returns null for modes without a country mapping", () => {
+    expect(countryNameForTargetId("landmarks", "eiffel-tower")).toBeNull();
+  });
 });

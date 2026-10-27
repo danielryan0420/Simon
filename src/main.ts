@@ -3,7 +3,7 @@ import { GlobeScene } from "./render/globe";
 import { el, clear } from "./ui/dom";
 import { getTargets, countryNameForTargetId, MODES, type Mode } from "./game/targets";
 import { buildRoundQueue, type QuestionFilter } from "./game/questions";
-import { buildDailyChallenge, dateKey } from "./game/daily";
+import { buildDailyChallenge, dateKey, isNextDay } from "./game/daily";
 import { mulberry32 } from "./game/rng";
 import { greatCircleDistanceKm } from "./game/geo";
 import { scoreAnswer, type AnswerScore } from "./game/scoring";
@@ -17,7 +17,9 @@ import {
 } from "./game/storage";
 import { ROUND_LENGTH, RACE_ROUND_LENGTH, ANSWER_TIMEOUT_MS, MASTERY_RATINGS } from "./game/constants";
 import * as sfx from "./game/sfx";
+import * as music from "./game/music";
 import { renderLearnedMap } from "./render/learnedMap";
+import { ACHIEVEMENTS, newlyUnlockedAchievements, type Achievement } from "./game/achievements";
 import type { Difficulty, GeoTarget, Region } from "./data/types";
 
 const REGIONS: Region[] = ["Africa", "Asia", "Europe", "North America", "South America", "Oceania"];
@@ -25,6 +27,7 @@ const DIFFICULTIES: { id: Difficulty; label: string }[] = [
   { id: "rookie", label: "Rookie" },
   { id: "pilot", label: "Pilot" },
   { id: "ace", label: "Ace" },
+  { id: "hard", label: "Hard" },
 ];
 
 type Screen =
@@ -36,6 +39,7 @@ type Screen =
   | "sessionSummary"
   | "settings"
   | "stats"
+  | "achievements"
   | "learned"
   | "raceSetup"
   | "racePlaying"
@@ -78,6 +82,9 @@ class GeoRacerApp {
   private lastResult: { target: GeoTarget; score: AnswerScore; mode: Mode } | null = null;
   private raceLastResult: { target: GeoTarget; scores: [AnswerScore, AnswerScore] } | null = null;
   private activeTapHandler: ((lat: number, lon: number) => void) | null = null;
+  private achievementToastRoot: HTMLElement;
+  private achievementToastQueue: Achievement[] = [];
+  private achievementToastShowing = false;
 
   constructor(globeRoot: HTMLElement, uiRoot: HTMLElement) {
     this.save = loadSave();
@@ -100,7 +107,80 @@ class GeoRacerApp {
     muteBtn.style.right = "max(12px, var(--safe-right))";
     document.body.append(muteBtn);
 
+    const musicBtn = el("button", {
+      class: "icon-btn mute-fixed",
+      style: "position:fixed; z-index:50;",
+      onClick: () => {
+        music.toggleMusic();
+        musicBtn.textContent = music.isMusicOn() ? "\u{1F3B5}" : "\u{1F3B6}";
+      },
+    });
+    musicBtn.textContent = music.isMusicOn() ? "\u{1F3B5}" : "\u{1F3B6}";
+    musicBtn.style.top = "max(12px, var(--safe-top))";
+    musicBtn.style.right = "max(64px, calc(var(--safe-right) + 52px))";
+    document.body.append(musicBtn);
+
+    this.achievementToastRoot = el("div", { class: "achievement-toast-root" });
+    document.body.append(this.achievementToastRoot);
+
     this.renderHome();
+  }
+
+  // ---------- ACHIEVEMENTS ----------
+  private unlockAchievements(): void {
+    const unlocked = newlyUnlockedAchievements(this.save);
+    if (unlocked.length === 0) return;
+    this.save.unlockedAchievementIds = [...this.save.unlockedAchievementIds, ...unlocked.map((a) => a.id)];
+    this.achievementToastQueue.push(...unlocked);
+    this.showNextAchievementToast();
+  }
+
+  private showNextAchievementToast(): void {
+    if (this.achievementToastShowing) return;
+    const next = this.achievementToastQueue.shift();
+    if (!next) return;
+    this.achievementToastShowing = true;
+
+    const toast = el("div", { class: "achievement-toast" }, [
+      el("div", { class: "achievement-toast-icon" }, [next.icon]),
+      el("div", { class: "achievement-toast-body" }, [
+        el("div", { class: "achievement-toast-title" }, ["Achievement Unlocked!"]),
+        el("div", { class: "achievement-toast-name" }, [next.name]),
+      ]),
+    ]);
+    this.achievementToastRoot.append(toast);
+    sfx.playAchievement();
+
+    window.setTimeout(() => {
+      toast.classList.add("achievement-toast-out");
+      window.setTimeout(() => {
+        toast.remove();
+        this.achievementToastShowing = false;
+        this.showNextAchievementToast();
+      }, 300);
+    }, 2600);
+  }
+
+  private renderAchievements(): void {
+    this.setScreen("achievements");
+    const unlockedIds = new Set(this.save.unlockedAchievementIds);
+    const rows = ACHIEVEMENTS.map((a) =>
+      el("div", { class: `achievement-row ${unlockedIds.has(a.id) ? "unlocked" : "locked"}` }, [
+        el("div", { class: "achievement-row-icon" }, [unlockedIds.has(a.id) ? a.icon : "\u{1F512}"]),
+        el("div", { class: "achievement-row-body" }, [
+          el("div", { class: "achievement-row-name" }, [a.name]),
+          el("div", { class: "achievement-row-desc" }, [a.description]),
+        ]),
+      ])
+    );
+    const panel = el("div", { class: "screen-center" }, [
+      el("h2", {}, ["Achievements"]),
+      el("p", { class: "small-muted" }, [`${unlockedIds.size} / ${ACHIEVEMENTS.length} unlocked`]),
+      el("div", { class: "achievement-list" }, rows),
+      el("button", { class: "btn btn-primary", onClick: () => this.renderHome() }, ["← Back"]),
+    ]);
+    clear(this.uiContent);
+    this.uiContent.append(panel);
   }
 
   private setScreen(screen: Screen): void {
@@ -121,6 +201,7 @@ class GeoRacerApp {
       el("button", { class: "btn", onClick: () => this.renderRaceSetup() }, ["\u{1F3C1} 2-Player Race"]),
       el("button", { class: "btn", onClick: () => this.renderLearned() }, ["\u{1F5FA}️ Learned Map"]),
       el("button", { class: "btn", onClick: () => this.renderStats() }, ["\u{1F3C6} Stats & Leaderboard"]),
+      el("button", { class: "btn", onClick: () => this.renderAchievements() }, ["\u{1F396}️ Achievements"]),
       el("button", { class: "btn", onClick: () => this.renderSettings() }, ["⚙️ Settings"]),
     ]);
     clear(this.uiContent);
@@ -208,6 +289,7 @@ class GeoRacerApp {
       capitals: getTargets("capitals"),
       landmarks: getTargets("landmarks"),
       states: getTargets("states"),
+      flags: getTargets("flags"),
     };
     const queue = buildDailyChallenge(byMode);
     this.round = {
@@ -259,7 +341,12 @@ class GeoRacerApp {
     const target = this.round.queue[this.round.index];
     this.round.questionStart = performance.now();
 
-    const promptBanner = el("div", { class: "prompt-banner" }, [target.prompt]);
+    const promptBanner = target.promptImage
+      ? el("div", { class: "prompt-banner prompt-banner-flag" }, [
+          el("div", { class: "flag-prompt-img", html: target.promptImage }),
+          el("div", {}, [target.prompt]),
+        ])
+      : el("div", { class: "prompt-banner" }, [target.prompt]);
     const scorePill = el("div", { class: "pill" }, [`Score ${this.round.score}`]);
     const streakPill = el("div", { class: `pill ${this.round.streak > 0 ? "combo-pill" : ""}` }, [
       this.round.streak > 0 ? `\u{1F525} x${this.round.streak}` : "No streak",
@@ -323,6 +410,8 @@ class GeoRacerApp {
     this.round.score += result.totalPoints;
     this.round.xpEarned += xpForAnswer(result.totalPoints, result.rating);
     this.save.bestStreak = Math.max(this.save.bestStreak, this.round.streak);
+    if (result.rating === "perfect") this.save.perfectCount += 1;
+    else if (result.rating === "great") this.save.greatCount += 1;
 
     if (MASTERY_RATINGS.has(result.rating)) {
       this.save = recordLearned(this.save, target.id);
@@ -391,7 +480,10 @@ class GeoRacerApp {
     const after = levelForXp(this.save.xp);
 
     if (this.round.isDaily) {
-      this.save.lastDailyKey = dateKey();
+      const today = dateKey();
+      this.save.dailyStreak = this.save.lastDailyKey && isNextDay(this.save.lastDailyKey, today) ? this.save.dailyStreak + 1 : 1;
+      this.save.dailyCompletedCount += 1;
+      this.save.lastDailyKey = today;
       this.save.lastDailyScore = this.round.score;
     }
 
@@ -401,6 +493,7 @@ class GeoRacerApp {
       score: this.round.score,
       date: dateKey(),
     });
+    this.unlockAchievements();
     saveSave(this.save);
 
     const leveledUp = after.level > before.level;
@@ -584,6 +677,10 @@ class GeoRacerApp {
     if (!this.race) return;
     const [s1, s2] = this.race.scores;
     const winner = s1 === s2 ? "It's a tie!" : s1 > s2 ? `${this.race.names[0]} wins!` : `${this.race.names[1]} wins!`;
+    this.save.racesPlayed += 1;
+    if (s1 !== s2) this.save.raceWins += 1;
+    this.unlockAchievements();
+    saveSave(this.save);
     const panel = el("div", { class: "screen-center" }, [
       el("h2", {}, ["Race Complete!"]),
       el("div", { class: "race-score-row" }, [
@@ -705,7 +802,23 @@ class GeoRacerApp {
           class: "btn",
           onClick: () => {
             if (confirm("Reset all progress? This cannot be undone.")) {
-              this.save = { ...loadSave(), xp: 0, learnedIds: [], leaderboard: [], gamesPlayed: 0, bestStreak: 0, lastDailyKey: null, lastDailyScore: null };
+              this.save = {
+                ...loadSave(),
+                xp: 0,
+                learnedIds: [],
+                leaderboard: [],
+                gamesPlayed: 0,
+                bestStreak: 0,
+                lastDailyKey: null,
+                lastDailyScore: null,
+                perfectCount: 0,
+                greatCount: 0,
+                dailyCompletedCount: 0,
+                dailyStreak: 0,
+                racesPlayed: 0,
+                raceWins: 0,
+                unlockedAchievementIds: [],
+              };
               saveSave(this.save);
               render();
             }

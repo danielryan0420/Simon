@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDailyChallenge, dateKey } from "../src/game/daily";
+import { buildDailyChallenge, dateKey, isNextDay } from "../src/game/daily";
 import { getTargets, type Mode } from "../src/game/targets";
 
 const byMode: Record<Mode, ReturnType<typeof getTargets>> = {
@@ -7,6 +7,7 @@ const byMode: Record<Mode, ReturnType<typeof getTargets>> = {
   capitals: getTargets("capitals"),
   landmarks: getTargets("landmarks"),
   states: getTargets("states"),
+  flags: getTargets("flags"),
 };
 
 describe("dateKey", () => {
@@ -31,5 +32,20 @@ describe("buildDailyChallenge", () => {
   it("returns a fixed-length round", () => {
     const a = buildDailyChallenge(byMode, new Date("2026-01-01T00:00:00Z"));
     expect(a.length).toBe(10);
+  });
+});
+
+describe("isNextDay", () => {
+  it("is true for consecutive calendar days", () => {
+    expect(isNextDay("2026-10-26", "2026-10-27")).toBe(true);
+  });
+
+  it("is true across a month boundary", () => {
+    expect(isNextDay("2026-01-31", "2026-02-01")).toBe(true);
+  });
+
+  it("is false for the same day or a gap", () => {
+    expect(isNextDay("2026-10-26", "2026-10-26")).toBe(false);
+    expect(isNextDay("2026-10-26", "2026-10-28")).toBe(false);
   });
 });

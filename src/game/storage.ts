@@ -19,6 +19,13 @@ export interface SaveData {
   lastDailyScore: number | null;
   gamesPlayed: number;
   bestStreak: number;
+  perfectCount: number;
+  greatCount: number;
+  dailyCompletedCount: number;
+  dailyStreak: number;
+  racesPlayed: number;
+  raceWins: number;
+  unlockedAchievementIds: string[];
 }
 
 function defaultSave(): SaveData {
@@ -32,6 +39,13 @@ function defaultSave(): SaveData {
     lastDailyScore: null,
     gamesPlayed: 0,
     bestStreak: 0,
+    perfectCount: 0,
+    greatCount: 0,
+    dailyCompletedCount: 0,
+    dailyStreak: 0,
+    racesPlayed: 0,
+    raceWins: 0,
+    unlockedAchievementIds: [],
   };
 }
 

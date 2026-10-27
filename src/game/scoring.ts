@@ -16,6 +16,7 @@ const DIFFICULTY_MULTIPLIER: Record<Difficulty, number> = {
   rookie: 1,
   pilot: 1.25,
   ace: 1.5,
+  hard: 1.75,
 };
 
 export function rateDistance(distanceKm: number): Rating {
