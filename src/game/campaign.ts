@@ -1,5 +1,7 @@
 import { COUNTRIES } from "../data/countries";
 import type { Difficulty, Region } from "../data/types";
+import { BOSS_ROUND_CAP } from "./constants";
+import { shuffle } from "./rng";
 import type { Rating } from "./scoring";
 
 /** Fixed continent order the World Tour campaign progresses through. */
@@ -78,6 +80,34 @@ export function buildCampaign(): CampaignLevel[] {
 
 export function levelsForRegion(region: Region): CampaignLevel[] {
   return buildCampaign().filter((l) => l.region === region);
+}
+
+/**
+ * Picks up to `BOSS_ROUND_CAP` country ids from a boss level's full roster for a single
+ * playthrough. Samples proportionally across difficulty tiers (at least one per tier when
+ * possible) so a boss round mixes big, famous countries with smaller, trickier ones instead
+ * of just playing straight through every country on the continent. Re-rolled on every play.
+ */
+export function selectBossRoundCountryIds(level: CampaignLevel, rng: () => number): string[] {
+  const pool = COUNTRIES.filter((c) => level.countryIds.includes(c.id));
+  if (pool.length <= BOSS_ROUND_CAP) return shuffle(pool, rng).map((c) => c.id);
+
+  const tiers = (["rookie", "pilot", "ace", "hard"] as Difficulty[])
+    .map((d) => shuffle(pool.filter((c) => c.difficulty === d), rng))
+    .filter((list) => list.length > 0);
+
+  const picked: (typeof pool)[number][] = [];
+  let remainingCap = BOSS_ROUND_CAP;
+  let remainingTiers = tiers.length;
+  for (const list of tiers) {
+    const quota = Math.max(1, Math.round((list.length / pool.length) * BOSS_ROUND_CAP));
+    const take = Math.min(quota, list.length, remainingCap - (remainingTiers - 1));
+    picked.push(...list.slice(0, take));
+    remainingCap -= take;
+    remainingTiers -= 1;
+  }
+
+  return shuffle(picked, rng).map((c) => c.id);
 }
 
 export function isRegionBossCleared(region: Region, campaignStars: Record<string, number>): boolean {

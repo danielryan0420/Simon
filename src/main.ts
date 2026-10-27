@@ -32,6 +32,7 @@ import {
   isLevelUnlocked,
   isRegionUnlocked,
   starsForRatings,
+  selectBossRoundCountryIds,
   CAMPAIGN_REGIONS,
   type CampaignLevel,
 } from "./game/campaign";
@@ -515,8 +516,9 @@ class GeoRacerApp {
   }
 
   private startCampaignLevel(level: CampaignLevel): void {
-    const pool = getTargets("countries").filter((t) => level.countryIds.includes(t.id));
     const rng = mulberry32(Date.now() & 0xffffffff);
+    const ids = level.isBoss ? selectBossRoundCountryIds(level, rng) : level.countryIds;
+    const pool = getTargets("countries").filter((t) => ids.includes(t.id));
     const queue = shuffle(pool, rng);
     this.round = {
       mode: "countries",

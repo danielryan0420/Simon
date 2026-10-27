@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { COUNTRIES } from "../src/data/countries";
+import { BOSS_ROUND_CAP } from "../src/game/constants";
+import { mulberry32 } from "../src/game/rng";
 import {
   CAMPAIGN_REGIONS,
   LEVELS_PER_REGION,
@@ -7,6 +9,7 @@ import {
   isLevelUnlocked,
   isRegionUnlocked,
   levelsForRegion,
+  selectBossRoundCountryIds,
   starsForRatings,
 } from "../src/game/campaign";
 
@@ -85,6 +88,47 @@ describe("unlock progression", () => {
     expect(isLevelUnlocked(boss, partial)).toBe(false);
     const allCleared = Object.fromEntries(normalLevels.map((l) => [l.id, 1]));
     expect(isLevelUnlocked(boss, allCleared)).toBe(true);
+  });
+});
+
+describe("selectBossRoundCountryIds", () => {
+  it("caps large boss rosters (e.g. Europe) at BOSS_ROUND_CAP", () => {
+    const region = "Europe";
+    const boss = levelsForRegion(region).find((l) => l.isBoss)!;
+    expect(boss.countryIds.length).toBeGreaterThan(BOSS_ROUND_CAP);
+    for (const seed of [1, 2, 3]) {
+      const ids = selectBossRoundCountryIds(boss, mulberry32(seed));
+      expect(ids.length).toBe(BOSS_ROUND_CAP);
+      expect(new Set(ids).size).toBe(BOSS_ROUND_CAP);
+      for (const id of ids) expect(boss.countryIds).toContain(id);
+    }
+  });
+
+  it("returns the full roster, shuffled, when a region has BOSS_ROUND_CAP countries or fewer", () => {
+    const region = CAMPAIGN_REGIONS.find(
+      (r) => COUNTRIES.filter((c) => c.region === r).length <= BOSS_ROUND_CAP
+    )!;
+    const boss = levelsForRegion(region).find((l) => l.isBoss)!;
+    const ids = selectBossRoundCountryIds(boss, mulberry32(42));
+    expect(new Set(ids)).toEqual(new Set(boss.countryIds));
+  });
+
+  it("mixes difficulty tiers instead of only picking one tier of country", () => {
+    const region = "Europe";
+    const boss = levelsForRegion(region).find((l) => l.isBoss)!;
+    const ids = selectBossRoundCountryIds(boss, mulberry32(7));
+    const difficulties = new Set(
+      ids.map((id) => COUNTRIES.find((c) => c.id === id)!.difficulty)
+    );
+    expect(difficulties.size).toBeGreaterThan(1);
+  });
+
+  it("re-rolls a different selection on different plays", () => {
+    const region = "Europe";
+    const boss = levelsForRegion(region).find((l) => l.isBoss)!;
+    const first = selectBossRoundCountryIds(boss, mulberry32(1));
+    const second = selectBossRoundCountryIds(boss, mulberry32(2));
+    expect(first).not.toEqual(second);
   });
 });
 
