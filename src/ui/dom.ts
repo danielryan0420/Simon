@@ -28,3 +28,27 @@ export function el<K extends keyof HTMLElementTagNameMap>(
 export function clear(node: HTMLElement): void {
   node.replaceChildren();
 }
+
+/**
+ * A tappable "pill" option (difficulty/region/skin/theme/accessibility
+ * toggles). Plain `<div onClick>` chips are invisible to screen readers and
+ * unreachable by keyboard, so this bakes in button semantics everywhere
+ * chips are used instead of relying on every call site to remember.
+ */
+export function chip(label: string, selected: boolean, onClick: () => void, extraStyle = ""): HTMLDivElement {
+  const node = el("div", {
+    class: `chip ${selected ? "selected" : ""}`,
+    style: extraStyle,
+    role: "button",
+    tabindex: "0",
+    "aria-pressed": String(selected),
+    onClick: () => onClick(),
+  }, [label]) as HTMLDivElement;
+  node.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onClick();
+    }
+  });
+  return node;
+}

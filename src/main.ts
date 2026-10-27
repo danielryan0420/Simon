@@ -1,6 +1,6 @@
 import "./style.css";
 import { GlobeScene } from "./render/globe";
-import { el, clear } from "./ui/dom";
+import { el, clear, chip } from "./ui/dom";
 import { getTargets, countryNameForTargetId, MODES, type Mode } from "./game/targets";
 import { buildRoundQueue, type QuestionFilter } from "./game/questions";
 import { buildDailyChallenge, dateKey, isNextDay } from "./game/daily";
@@ -44,7 +44,27 @@ type Screen =
   | "raceSetup"
   | "racePlaying"
   | "raceRoundResult"
-  | "raceSummary";
+  | "raceSummary"
+  | "tutorial";
+
+interface TutorialStep {
+  icon: string;
+  title: string;
+  body: string;
+}
+
+const TUTORIAL_STEP_MS = 12000;
+const TUTORIAL_STEPS: TutorialStep[] = [
+  { icon: "\u{1F30D}", title: "Welcome, Explorer!", body: "Drag the globe to spin it. Pinch (or scroll) to zoom in and out." },
+  { icon: "\u{1F449}", title: "Tap to Answer", body: "Read the prompt at the top, find the spot, and tap it on the globe." },
+  { icon: "⏱️", title: "Beat the Clock", body: "Answer fast and land close to the target for PERFECT and GREAT scores." },
+  { icon: "\u{1F525}", title: "Build a Streak", body: "Chain correct answers in a row to build a combo for bonus points." },
+  { icon: "\u{1F3C6}", title: "Explore More", body: "Try the Daily Challenge and 2-Player Race, and unlock skins & themes as you level up!" },
+];
+
+function systemPrefersReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 interface RoundState {
   mode: Mode;
@@ -85,11 +105,17 @@ class GeoRacerApp {
   private achievementToastRoot: HTMLElement;
   private achievementToastQueue: Achievement[] = [];
   private achievementToastShowing = false;
+  private tutorialTimer: number | null = null;
+  private tutorialRaf: number | null = null;
 
   constructor(globeRoot: HTMLElement, uiRoot: HTMLElement) {
     this.save = loadSave();
     this.globe = new GlobeScene(globeRoot, { onTap: (lat, lon) => this.activeTapHandler?.(lat, lon) });
     this.globe.setTheme(this.save.selectedTheme);
+    this.applyAccessibility();
+
+    const reducedMotionMedia = window.matchMedia("(prefers-reduced-motion: reduce)");
+    reducedMotionMedia.addEventListener("change", () => this.applyAccessibility());
 
     this.uiContent = el("div", { id: "ui-content", style: "flex:1; display:flex; flex-direction:column; min-height:0;" });
     uiRoot.append(this.uiContent);
@@ -97,9 +123,11 @@ class GeoRacerApp {
     const muteBtn = el("button", {
       class: "icon-btn mute-fixed",
       style: "position:fixed; z-index:50;",
+      "aria-label": sfx.isMuted() ? "Unmute sound effects" : "Mute sound effects",
       onClick: () => {
         sfx.toggleMuted();
         muteBtn.textContent = sfx.isMuted() ? "\u{1F507}" : "\u{1F50A}";
+        muteBtn.setAttribute("aria-label", sfx.isMuted() ? "Unmute sound effects" : "Mute sound effects");
       },
     });
     muteBtn.textContent = sfx.isMuted() ? "\u{1F507}" : "\u{1F50A}";
@@ -110,9 +138,11 @@ class GeoRacerApp {
     const musicBtn = el("button", {
       class: "icon-btn mute-fixed",
       style: "position:fixed; z-index:50;",
+      "aria-label": music.isMusicOn() ? "Turn music off" : "Turn music on",
       onClick: () => {
         music.toggleMusic();
         musicBtn.textContent = music.isMusicOn() ? "\u{1F3B5}" : "\u{1F3B6}";
+        musicBtn.setAttribute("aria-label", music.isMusicOn() ? "Turn music off" : "Turn music on");
       },
     });
     musicBtn.textContent = music.isMusicOn() ? "\u{1F3B5}" : "\u{1F3B6}";
@@ -123,6 +153,80 @@ class GeoRacerApp {
     this.achievementToastRoot = el("div", { class: "achievement-toast-root" });
     document.body.append(this.achievementToastRoot);
 
+    if (this.save.hasSeenTutorial) this.renderHome();
+    else this.renderTutorial(0);
+  }
+
+  // ---------- ACCESSIBILITY ----------
+  private applyAccessibility(): void {
+    const a11y = this.save.accessibility;
+    document.documentElement.classList.toggle("a11y-large-text", a11y.largeText);
+    document.documentElement.classList.toggle("a11y-colorblind", a11y.colorBlindMode);
+    document.documentElement.classList.toggle("a11y-reduced-motion", a11y.reducedMotion);
+    this.globe.setColorBlindMode(a11y.colorBlindMode);
+    this.globe.setReducedMotion(a11y.reducedMotion || systemPrefersReducedMotion());
+  }
+
+  // ---------- FIRST-RUN TUTORIAL ----------
+  private clearTutorialTimers(): void {
+    if (this.tutorialTimer !== null) window.clearTimeout(this.tutorialTimer);
+    if (this.tutorialRaf !== null) cancelAnimationFrame(this.tutorialRaf);
+    this.tutorialTimer = null;
+    this.tutorialRaf = null;
+  }
+
+  private renderTutorial(stepIndex: number): void {
+    this.setScreen("tutorial");
+    this.globe.setAutoRotate(true);
+    this.clearTutorialTimers();
+    const step = TUTORIAL_STEPS[stepIndex];
+    const isLast = stepIndex + 1 >= TUTORIAL_STEPS.length;
+    const reduceMotion = this.save.accessibility.reducedMotion || systemPrefersReducedMotion();
+
+    const dots = el("div", { class: "chip-row", style: "margin:4px 0 16px;" }, TUTORIAL_STEPS.map((_, i) =>
+      el("span", { style: `width:8px; height:8px; border-radius:50%; display:inline-block; background:${i === stepIndex ? "var(--accent)" : "rgba(255,255,255,0.25)"};` }, [])
+    ));
+
+    const progressFill = el("div", { class: "timer-bar-fill", style: "width:0%;" });
+    const panel = el("div", { class: "screen-center" }, [
+      el("div", { style: "font-size:3rem; line-height:1;" }, [step.icon]),
+      el("h2", {}, [step.title]),
+      el("p", {}, [step.body]),
+      dots,
+      reduceMotion ? el("div") : el("div", { class: "timer-bar-track" }, [progressFill]),
+      el("div", { class: "btn-row", style: "margin-top:16px;" }, [
+        el("button", { class: "btn", onClick: () => this.finishTutorial() }, ["Skip"]),
+        el("button", {
+          class: "btn btn-primary",
+          onClick: () => this.advanceTutorial(stepIndex),
+        }, [isLast ? "Let's Go! \u{1F680}" : "Next →"]),
+      ]),
+    ]);
+    clear(this.uiContent);
+    this.uiContent.append(panel);
+
+    if (!reduceMotion) {
+      const start = performance.now();
+      const tick = () => {
+        const t = Math.min(1, (performance.now() - start) / TUTORIAL_STEP_MS);
+        progressFill.style.width = `${t * 100}%`;
+        if (t < 1) this.tutorialRaf = requestAnimationFrame(tick);
+      };
+      this.tutorialRaf = requestAnimationFrame(tick);
+      this.tutorialTimer = window.setTimeout(() => this.advanceTutorial(stepIndex), TUTORIAL_STEP_MS);
+    }
+  }
+
+  private advanceTutorial(stepIndex: number): void {
+    const next = stepIndex + 1;
+    if (next >= TUTORIAL_STEPS.length) this.finishTutorial();
+    else this.renderTutorial(next);
+  }
+
+  private finishTutorial(): void {
+    this.clearTutorialTimers();
+    this.save.hasSeenTutorial = true;
+    saveSave(this.save);
     this.renderHome();
   }
 
@@ -234,25 +338,19 @@ class GeoRacerApp {
 
     const render = () => {
       const diffRow = el("div", { class: "chip-row" }, DIFFICULTIES.map((d) =>
-        el("div", {
-          class: `chip ${this.pendingDifficulty === d.id ? "selected" : ""}`,
-          onClick: () => {
-            this.pendingDifficulty = d.id;
-            render();
-          },
-        }, [d.label])
+        chip(d.label, this.pendingDifficulty === d.id, () => {
+          this.pendingDifficulty = d.id;
+          render();
+        })
       ));
 
       const regionRow = el("div", { class: "chip-row" }, REGIONS.map((r) =>
-        el("div", {
-          class: `chip ${regionsSelected.has(r) ? "selected" : ""}`,
-          onClick: () => {
-            if (regionsSelected.has(r)) regionsSelected.delete(r);
-            else regionsSelected.add(r);
-            this.pendingRegions = [...regionsSelected];
-            render();
-          },
-        }, [r])
+        chip(r, regionsSelected.has(r), () => {
+          if (regionsSelected.has(r)) regionsSelected.delete(r);
+          else regionsSelected.add(r);
+          this.pendingRegions = [...regionsSelected];
+          render();
+        })
       ));
 
       const panel = el("div", { class: "screen-center" }, [
@@ -351,7 +449,7 @@ class GeoRacerApp {
     const streakPill = el("div", { class: `pill ${this.round.streak > 0 ? "combo-pill" : ""}` }, [
       this.round.streak > 0 ? `\u{1F525} x${this.round.streak}` : "No streak",
     ]);
-    const quitBtn = el("button", { class: "icon-btn", onClick: () => this.confirmQuitRound() }, ["✕"]);
+    const quitBtn = el("button", { class: "icon-btn", "aria-label": "Quit round", onClick: () => this.confirmQuitRound() }, ["✕"]);
 
     const hudTop = el("div", { class: "hud-top" }, [
       quitBtn,
@@ -417,9 +515,9 @@ class GeoRacerApp {
       this.save = recordLearned(this.save, target.id);
     }
 
-    this.globe.dropPin(lat, lon, result.rating === "miss" ? 0xff5a5f : 0x38bdf8);
+    this.globe.dropPin(lat, lon, result.rating === "miss" ? "miss" : "tap");
     this.globe.launchProjectile(lat, lon, target.lat, target.lon, this.save.selectedSkin).then(() => {
-      this.globe.dropPin(target.lat, target.lon, 0x3ddc84);
+      this.globe.dropPin(target.lat, target.lon, "target");
       if (result.rating === "perfect" || result.rating === "great") {
         this.globe.burstConfetti(target.lat, target.lon);
       }
@@ -622,7 +720,7 @@ class GeoRacerApp {
     const result = scoreAnswer(distanceKm, elapsedMs, target.difficulty, 0);
     this.playRatingSfx(result.rating, 0);
 
-    this.globe.dropPin(lat, lon, 0x38bdf8);
+    this.globe.dropPin(lat, lon, "tap");
     this.globe.flyTo(target.lat, target.lon, 1.7, 1000);
 
     const playerIdx = this.race.turn;
@@ -766,31 +864,47 @@ class GeoRacerApp {
 
     const render = () => {
       const skinChips = el("div", { class: "chip-row" }, UNLOCKABLES.filter((u) => u.kind === "skin").map((u) =>
-        el("div", {
-          class: `chip ${this.save.selectedSkin === u.id ? "selected" : ""}`,
-          style: unlockedIds.has(u.id) ? "" : "opacity:0.4;",
-          onClick: () => {
+        chip(
+          unlockedIds.has(u.id) ? u.name : `\u{1F512} ${u.name}`,
+          this.save.selectedSkin === u.id,
+          () => {
             if (!unlockedIds.has(u.id)) return;
             this.save.selectedSkin = u.id;
             saveSave(this.save);
             render();
           },
-        }, [unlockedIds.has(u.id) ? u.name : `\u{1F512} ${u.name}`])
+          unlockedIds.has(u.id) ? "" : "opacity:0.4;"
+        )
       ));
 
       const themeChips = el("div", { class: "chip-row" }, UNLOCKABLES.filter((u) => u.kind === "theme").map((u) =>
-        el("div", {
-          class: `chip ${this.save.selectedTheme === u.id ? "selected" : ""}`,
-          style: unlockedIds.has(u.id) ? "" : "opacity:0.4;",
-          onClick: () => {
+        chip(
+          unlockedIds.has(u.id) ? u.name : `\u{1F512} ${u.name}`,
+          this.save.selectedTheme === u.id,
+          () => {
             if (!unlockedIds.has(u.id)) return;
             this.save.selectedTheme = u.id;
             this.globe.setTheme(u.id);
             saveSave(this.save);
             render();
           },
-        }, [unlockedIds.has(u.id) ? u.name : `\u{1F512} ${u.name}`])
+          unlockedIds.has(u.id) ? "" : "opacity:0.4;"
+        )
       ));
+
+      const a11yToggle = (key: keyof SaveData["accessibility"], label: string) =>
+        chip(label, this.save.accessibility[key], () => {
+          this.save.accessibility = { ...this.save.accessibility, [key]: !this.save.accessibility[key] };
+          this.applyAccessibility();
+          saveSave(this.save);
+          render();
+        });
+
+      const a11yChips = el("div", { class: "chip-row" }, [
+        a11yToggle("largeText", "\u{1F524} Large Text"),
+        a11yToggle("colorBlindMode", "\u{1F3A8} Color-blind Pins"),
+        a11yToggle("reducedMotion", "\u{1F6D1} Reduced Motion"),
+      ]);
 
       const panel = el("div", { class: "screen-center" }, [
         el("h2", {}, ["Settings"]),
@@ -798,6 +912,9 @@ class GeoRacerApp {
         skinChips,
         el("div", { class: "small-muted" }, ["Globe Theme"]),
         themeChips,
+        el("div", { class: "small-muted" }, ["Accessibility"]),
+        a11yChips,
+        el("button", { class: "btn", onClick: () => this.renderTutorial(0) }, ["▶️ Replay Tutorial"]),
         el("button", {
           class: "btn",
           onClick: () => {

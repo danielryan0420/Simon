@@ -9,6 +9,12 @@ export interface LeaderboardEntry {
   date: string;
 }
 
+export interface AccessibilitySettings {
+  largeText: boolean;
+  colorBlindMode: boolean;
+  reducedMotion: boolean;
+}
+
 export interface SaveData {
   xp: number;
   learnedIds: string[];
@@ -26,6 +32,8 @@ export interface SaveData {
   racesPlayed: number;
   raceWins: number;
   unlockedAchievementIds: string[];
+  hasSeenTutorial: boolean;
+  accessibility: AccessibilitySettings;
 }
 
 function defaultSave(): SaveData {
@@ -46,6 +54,8 @@ function defaultSave(): SaveData {
     racesPlayed: 0,
     raceWins: 0,
     unlockedAchievementIds: [],
+    hasSeenTutorial: false,
+    accessibility: { largeText: false, colorBlindMode: false, reducedMotion: false },
   };
 }
 
@@ -54,7 +64,11 @@ export function loadSave(): SaveData {
     const raw = localStorage.getItem(KEY);
     if (!raw) return defaultSave();
     const parsed = JSON.parse(raw);
-    return { ...defaultSave(), ...parsed };
+    return {
+      ...defaultSave(),
+      ...parsed,
+      accessibility: { ...defaultSave().accessibility, ...parsed.accessibility },
+    };
   } catch {
     return defaultSave();
   }

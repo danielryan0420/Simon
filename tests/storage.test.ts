@@ -11,6 +11,8 @@ describe("loadSave", () => {
     expect(data.xp).toBe(0);
     expect(data.learnedIds).toEqual([]);
     expect(data.leaderboard).toEqual([]);
+    expect(data.hasSeenTutorial).toBe(false);
+    expect(data.accessibility).toEqual({ largeText: false, colorBlindMode: false, reducedMotion: false });
   });
 
   it("round-trips through saveSave", () => {
@@ -19,6 +21,23 @@ describe("loadSave", () => {
     saveSave(data);
     const reloaded = loadSave();
     expect(reloaded.xp).toBe(500);
+  });
+
+  it("backfills accessibility defaults for saves written before the field existed", () => {
+    localStorage.setItem("geo-racer:save:v1", JSON.stringify({ xp: 42 }));
+    const data = loadSave();
+    expect(data.xp).toBe(42);
+    expect(data.accessibility).toEqual({ largeText: false, colorBlindMode: false, reducedMotion: false });
+    expect(data.hasSeenTutorial).toBe(false);
+  });
+
+  it("preserves a partially-set accessibility object while filling in the rest", () => {
+    localStorage.setItem(
+      "geo-racer:save:v1",
+      JSON.stringify({ accessibility: { largeText: true } })
+    );
+    const data = loadSave();
+    expect(data.accessibility).toEqual({ largeText: true, colorBlindMode: false, reducedMotion: false });
   });
 });
 

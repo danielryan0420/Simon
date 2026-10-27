@@ -26,7 +26,14 @@ body {
   color: #f1f5f9;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   touch-action: none;
+}
+
+html.a11y-large-text {
+  font-size: 118%;
 }
 
 #app-root {
@@ -60,6 +67,12 @@ button {
   font-family: inherit;
   pointer-events: auto;
   cursor: pointer;
+  min-height: 44px;
+}
+
+input {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .screen-center {
@@ -147,7 +160,10 @@ h2 {
 }
 
 .chip {
-  padding: 8px 14px;
+  padding: 11px 14px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
   border-radius: 999px;
   border: 1px solid var(--panel-border);
   background: rgba(30, 50, 90, 0.4);
@@ -232,8 +248,9 @@ h2 {
 
 .icon-btn {
   pointer-events: auto;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
   border-radius: 50%;
   border: 1px solid var(--panel-border);
   background: var(--panel-bg);
@@ -510,5 +527,39 @@ table.leaderboard td {
   }
   .logo {
     font-size: 1.6rem;
+  }
+}
+
+/* Color-blind-safe palette: swap red/green result cues for blue/amber/teal,
+   which stay distinguishable under deuteranopia and protanopia. */
+html.a11y-colorblind .rating-miss {
+  background: #ffb000;
+  color: #1a1200;
+}
+html.a11y-colorblind .rating-great {
+  background: #00c2d1;
+  color: #04212f;
+}
+html.a11y-colorblind .timer-bar-fill {
+  background: linear-gradient(90deg, #38bdf8, #ffb000);
+}
+
+html.a11y-reduced-motion *,
+html.a11y-reduced-motion *::before,
+html.a11y-reduced-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }

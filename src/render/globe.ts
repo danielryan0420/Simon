@@ -8,6 +8,7 @@ import { Projectile } from "./trail";
 import { ConfettiSystem } from "./confetti";
 import { getTheme } from "./themes";
 import { getSkin } from "./skins";
+import { resolvePinColor, type PinKind } from "./pinColors";
 
 const GLOBE_RADIUS = 1;
 const MIN_DISTANCE = 1.35;
@@ -18,8 +19,16 @@ export interface GlobeOptions {
   onTap?: (lat: number, lon: number) => void;
 }
 
-function isMobileDevice(): boolean {
-  return window.matchMedia("(max-width: 820px)").matches || "ontouchstart" in window;
+/**
+ * Chromebooks often report a large desktop-sized viewport with no touch
+ * events, so the max-width/touch checks alone miss them — fall back to
+ * core/memory hints to also give weak-GPU laptops the lighter render path.
+ */
+function isLowPowerDevice(): boolean {
+  if (window.matchMedia("(max-width: 820px)").matches || "ontouchstart" in window) return true;
+  const cores = (navigator as { hardwareConcurrency?: number }).hardwareConcurrency ?? 8;
+  const memory = (navigator as { deviceMemory?: number }).deviceMemory ?? 8;
+  return cores <= 4 || memory <= 4;
 }
 
 /** Spherical interpolation between two unit vectors (THREE.Vector3 has no slerp of its own). */
@@ -49,10 +58,13 @@ export class GlobeScene {
   private container: HTMLElement;
   private raf = 0;
   private lastTime = 0;
-  private mobile = isMobileDevice();
+  private mobile = isLowPowerDevice();
   private onTap?: (lat: number, lon: number) => void;
   private pointerDown: { x: number; y: number; time: number } | null = null;
   private resizeObserver: ResizeObserver;
+  private colorBlindMode = false;
+  private reducedMotion = false;
+  private wantsAutoRotate = true;
 
   constructor(container: HTMLElement, opts: GlobeOptions = {}) {
     this.container = container;
@@ -162,7 +174,17 @@ export class GlobeScene {
   }
 
   setAutoRotate(value: boolean): void {
-    this.controls.autoRotate = value;
+    this.wantsAutoRotate = value;
+    this.controls.autoRotate = value && !this.reducedMotion;
+  }
+
+  setColorBlindMode(value: boolean): void {
+    this.colorBlindMode = value;
+  }
+
+  setReducedMotion(value: boolean): void {
+    this.reducedMotion = value;
+    this.controls.autoRotate = this.wantsAutoRotate && !value;
   }
 
   private handlePointerDown = (e: PointerEvent): void => {
@@ -200,6 +222,7 @@ export class GlobeScene {
 
   /** Smoothly orbits the camera so the given lat/lon faces the viewer. */
   flyTo(lat: number, lon: number, distance = 1.8, duration = 1400): Promise<void> {
+    const effectiveDuration = this.reducedMotion ? Math.min(250, duration) : duration;
     return new Promise((resolve) => {
       const [tx, ty, tz] = latLonToVector3(lat, lon, 1);
       const targetDir = new THREE.Vector3(tx, ty, tz).normalize();
@@ -212,7 +235,7 @@ export class GlobeScene {
 
       const startTime = performance.now();
       const animate = () => {
-        const t = Math.min(1, (performance.now() - startTime) / duration);
+        const t = Math.min(1, (performance.now() - startTime) / effectiveDuration);
         const eased = 1 - Math.pow(1 - t, 3);
         const dir = slerpUnitVectors(startDir, targetDir, eased);
         const dist = startDist + (distance - startDist) * eased;
@@ -229,7 +252,8 @@ export class GlobeScene {
     });
   }
 
-  dropPin(lat: number, lon: number, color = 0xff4d4d): THREE.Group {
+  dropPin(lat: number, lon: number, kind: PinKind = "tap"): THREE.Group {
+    const color = resolvePinColor(kind, this.colorBlindMode);
     const [x, y, z] = latLonToVector3(lat, lon, GLOBE_RADIUS * 1.01);
     const group = new THREE.Group();
     const poleGeo = new THREE.CylinderGeometry(0.004, 0.004, 0.05, 6);
@@ -243,9 +267,13 @@ export class GlobeScene {
     group.position.set(x, y, z);
     group.lookAt(0, 0, 0);
     group.rotateX(Math.PI / 2);
+    this.pinGroup.add(group);
+    if (this.reducedMotion) {
+      group.scale.setScalar(1);
+      return group;
+    }
     // Pop-in animation.
     group.scale.setScalar(0.001);
-    this.pinGroup.add(group);
     const start = performance.now();
     const grow = () => {
       const t = Math.min(1, (performance.now() - start) / 350);
@@ -294,6 +322,7 @@ export class GlobeScene {
   }
 
   burstConfetti(lat: number, lon: number, count?: number): void {
+    if (this.reducedMotion) return;
     const [x, y, z] = latLonToVector3(lat, lon, GLOBE_RADIUS * 1.03);
     this.confetti.burst(new THREE.Vector3(x, y, z), count ?? (this.mobile ? 20 : 45));
   }

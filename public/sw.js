@@ -1,4 +1,4 @@
-const CACHE_VERSION = "geo-racer-v1";
+const CACHE_VERSION = "geo-racer-v2";
 const BASE = self.registration ? new URL(self.registration.scope).pathname : "/";
 
 const PRECACHE_URLS = [
@@ -36,21 +36,35 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
+  // Navigations (the HTML shell) go network-first so a fresh deploy's new
+  // hashed JS/CSS filenames are picked up as soon as the device is online;
+  // without this, "cache forever" would wedge installed PWAs on old builds.
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      caches.open(CACHE_VERSION).then(async (cache) => {
+        try {
+          const response = await fetch(event.request);
+          if (response.ok) cache.put(event.request, response.clone());
+          return response;
+        } catch (err) {
+          const cached = await cache.match(event.request);
+          if (cached) return cached;
+          const shell = await cache.match(BASE);
+          if (shell) return shell;
+          throw err;
+        }
+      })
+    );
+    return;
+  }
+
   event.respondWith(
     caches.open(CACHE_VERSION).then(async (cache) => {
       const cached = await cache.match(event.request);
       if (cached) return cached;
-      try {
-        const response = await fetch(event.request);
-        if (response.ok) cache.put(event.request, response.clone());
-        return response;
-      } catch (err) {
-        if (event.request.mode === "navigate") {
-          const shell = await cache.match(BASE);
-          if (shell) return shell;
-        }
-        throw err;
-      }
+      const response = await fetch(event.request);
+      if (response.ok) cache.put(event.request, response.clone());
+      return response;
     })
   );
 });
