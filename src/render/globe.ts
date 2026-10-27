@@ -3,6 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { latLonToVector3, vector3ToLatLon } from "../game/geo";
 import { createAtmosphere } from "./atmosphere";
 import { createStarfield } from "./starfield";
+import { buildBorderLines } from "./borders";
 import { Projectile } from "./trail";
 import { ConfettiSystem } from "./confetti";
 import { getTheme } from "./themes";
@@ -11,6 +12,7 @@ import { getSkin } from "./skins";
 const GLOBE_RADIUS = 1;
 const MIN_DISTANCE = 1.35;
 const MAX_DISTANCE = 3.2;
+const BORDER_RADIUS = GLOBE_RADIUS * 1.004;
 
 export interface GlobeOptions {
   onTap?: (lat: number, lon: number) => void;
@@ -37,6 +39,7 @@ export class GlobeScene {
   readonly camera: THREE.PerspectiveCamera;
   readonly controls: OrbitControls;
   private earth: THREE.Mesh;
+  private borders: THREE.LineSegments | null = null;
   private clouds: THREE.Mesh;
   private atmosphere: THREE.Mesh;
   private starfield: THREE.Points;
@@ -94,6 +97,11 @@ export class GlobeScene {
     this.earth = new THREE.Mesh(earthGeo, earthMat);
     this.scene.add(this.earth);
 
+    buildBorderLines(BORDER_RADIUS).then((lines) => {
+      this.borders = lines;
+      this.scene.add(lines);
+    });
+
     const cloudGeo = new THREE.SphereGeometry(GLOBE_RADIUS * 1.008, this.mobile ? 32 : 64, this.mobile ? 32 : 64);
     const cloudMat = new THREE.MeshLambertMaterial({
       map: cloudsMap,
@@ -114,10 +122,11 @@ export class GlobeScene {
     this.scene.add(this.pinGroup);
     this.scene.add(this.confetti.group);
 
-    const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+    // Ambient is raised relative to the sun so the night side stays ~55% as bright as day.
+    const sun = new THREE.DirectionalLight(0xffffff, 1.1);
     sun.position.set(5, 2, 5);
     this.scene.add(sun);
-    const ambient = new THREE.AmbientLight(0x6080a0, 1.1);
+    const ambient = new THREE.AmbientLight(0x6080a0, 2.6);
     this.scene.add(ambient);
 
     this.renderer.domElement.addEventListener("pointerdown", this.handlePointerDown);
@@ -314,6 +323,10 @@ export class GlobeScene {
   dispose(): void {
     cancelAnimationFrame(this.raf);
     this.resizeObserver.disconnect();
+    if (this.borders) {
+      this.borders.geometry.dispose();
+      (this.borders.material as THREE.Material).dispose();
+    }
     this.renderer.domElement.removeEventListener("pointerdown", this.handlePointerDown);
     this.renderer.domElement.removeEventListener("pointerup", this.handlePointerUp);
     this.controls.dispose();

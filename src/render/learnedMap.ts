@@ -1,30 +1,11 @@
 /** Renders a flat equirectangular "Learned" map, shading in countries the player has mastered. */
 
-interface GeoFeature {
-  type: "Feature";
-  properties: { name: string };
-  geometry: { type: "Polygon" | "MultiPolygon"; coordinates: number[][][] | number[][][][] };
-}
-
-interface GeoCollection {
-  type: "FeatureCollection";
-  features: GeoFeature[];
-}
+import { loadWorldGeo } from "../data/worldGeo";
 
 /** Natural Earth name overrides for countries whose gameplay name differs. */
 const NAME_ALIASES: Record<string, string> = {
   "United States": "United States of America",
 };
-
-let cachedGeo: GeoCollection | null = null;
-
-async function loadGeo(): Promise<GeoCollection> {
-  if (cachedGeo) return cachedGeo;
-  const base = import.meta.env.BASE_URL;
-  const res = await fetch(`${base}data/countries.geojson`);
-  cachedGeo = await res.json();
-  return cachedGeo!;
-}
 
 function project(lon: number, lat: number, width: number, height: number): [number, number] {
   const x = ((lon + 180) / 360) * width;
@@ -49,7 +30,7 @@ export async function renderLearnedMap(
   canvas: HTMLCanvasElement,
   learnedCountryNames: Set<string>
 ): Promise<void> {
-  const geo = await loadGeo();
+  const geo = await loadWorldGeo();
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const width = canvas.width;
