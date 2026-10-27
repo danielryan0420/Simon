@@ -7,6 +7,8 @@ import { buildDailyChallenge, dateKey, isNextDay } from "./game/daily";
 import { mulberry32, shuffle } from "./game/rng";
 import { greatCircleDistanceKm } from "./game/geo";
 import { scoreAnswer, type AnswerScore, type Rating } from "./game/scoring";
+import { countryContainsPoint } from "./game/countryHitTest";
+import { loadWorldGeo, type GeoCollection } from "./data/worldGeo";
 import { levelForXp, xpForAnswer, newlyUnlockedForLevel, unlockedAtLevel, UNLOCKABLES } from "./game/progression";
 import {
   loadSave,
@@ -193,6 +195,7 @@ class GeoRacerApp {
   private achievementToastShowing = false;
   private tutorialTimer: number | null = null;
   private tutorialRaf: number | null = null;
+  private countryGeo: GeoCollection | null = null;
 
   constructor(globeRoot: HTMLElement, uiRoot: HTMLElement) {
     migrateLegacySave();
@@ -204,6 +207,9 @@ class GeoRacerApp {
     this.globe = new GlobeScene(globeRoot, { onTap: (lat, lon) => this.activeTapHandler?.(lat, lon) });
     this.globe.setTheme(this.settings.selectedTheme);
     this.applyAccessibility();
+    loadWorldGeo().then((geo) => {
+      this.countryGeo = geo;
+    });
 
     const reducedMotionMedia = window.matchMedia("(prefers-reduced-motion: reduce)");
     reducedMotionMedia.addEventListener("change", () => this.applyAccessibility());
@@ -628,6 +634,18 @@ class GeoRacerApp {
     }
   }
 
+  /**
+   * For "pick the whole country" targets (Countries/Flags modes, and anything
+   * drawing from the Countries pool), a tap anywhere inside the target
+   * country's actual borders counts as a dead-center hit, not just a tap near
+   * its labeled lat/lon. Falls back to false (plain distance scoring) until
+   * the border data has loaded or if a country has no bundled polygon.
+   */
+  private isCountryShapeHit(target: GeoTarget, lat: number, lon: number): boolean {
+    if (!this.countryGeo) return false;
+    return countryContainsPoint(this.countryGeo, target.name, lat, lon).hit;
+  }
+
   private submitAnswer(lat: number, lon: number): void {
     if (!this.round) return;
     this.activeTapHandler = null;
@@ -635,7 +653,9 @@ class GeoRacerApp {
 
     const target = this.round.queue[this.round.index];
     const elapsedMs = performance.now() - this.round.questionStart;
-    const distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: target.lat, lon: target.lon });
+    const usesCountryShape = this.round.mode === "countries" || this.round.mode === "flags";
+    let distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: target.lat, lon: target.lon });
+    if (usesCountryShape && this.isCountryShapeHit(target, lat, lon)) distanceKm = 0;
     const difficulty = target.difficulty;
     const result = scoreAnswer(distanceKm, elapsedMs, difficulty, this.round.streak);
     this.round.ratings.push(result.rating);
@@ -660,7 +680,7 @@ class GeoRacerApp {
     });
 
     this.playRatingSfx(result.rating, this.round.streak);
-    this.globe.flyTo(target.lat, target.lon, 1.7, 1200);
+    this.globe.flyTo(target.lat, target.lon, 1.7);
 
     this.lastResult = { target, score: result, mode: this.round.mode };
     window.setTimeout(() => this.renderRoundResult(), 650);
@@ -924,7 +944,8 @@ class GeoRacerApp {
     this.activeTapHandler = null;
     const target = this.timeAttack.queue[this.timeAttack.index % this.timeAttack.queue.length];
     const elapsedMs = performance.now() - questionStart;
-    const distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: target.lat, lon: target.lon });
+    let distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: target.lat, lon: target.lon });
+    if (this.isCountryShapeHit(target, lat, lon)) distanceKm = 0;
     const result = scoreAnswer(distanceKm, elapsedMs, target.difficulty, this.timeAttack.streak);
 
     this.timeAttack.streak = result.rating === "miss" ? 0 : this.timeAttack.streak + 1;
@@ -1062,7 +1083,8 @@ class GeoRacerApp {
   private submitDetectiveGuess(lat: number, lon: number): void {
     if (!this.detective) return;
     const detectiveCase = this.detective.queue[this.detective.index];
-    const distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: detectiveCase.lat, lon: detectiveCase.lon });
+    let distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: detectiveCase.lat, lon: detectiveCase.lon });
+    if (this.isCountryShapeHit(detectiveCase, lat, lon)) distanceKm = 0;
 
     if (isCorrectGuess(distanceKm)) {
       this.activeTapHandler = null;
@@ -1079,7 +1101,7 @@ class GeoRacerApp {
       this.globe.dropPin(detectiveCase.lat, detectiveCase.lon, "target");
       this.globe.burstConfetti(detectiveCase.lat, detectiveCase.lon);
       sfx.playPerfect();
-      this.globe.flyTo(detectiveCase.lat, detectiveCase.lon, 1.7, 1200);
+      this.globe.flyTo(detectiveCase.lat, detectiveCase.lon, 1.7);
 
       this.lastDetectiveResult = { detectiveCase, cluesRevealed, points };
       this.detective.advanceHandle = window.setTimeout(() => this.renderDetectiveCaseResult(true), 650);
@@ -1365,12 +1387,13 @@ class GeoRacerApp {
     this.activeTapHandler = null;
     const target = this.race.queue[this.race.index];
     const elapsedMs = performance.now() - this.race.questionStart;
-    const distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: target.lat, lon: target.lon });
+    let distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: target.lat, lon: target.lon });
+    if (this.isCountryShapeHit(target, lat, lon)) distanceKm = 0;
     const result = scoreAnswer(distanceKm, elapsedMs, target.difficulty, 0);
     this.playRatingSfx(result.rating, 0);
 
     this.globe.dropPin(lat, lon, "tap");
-    this.globe.flyTo(target.lat, target.lon, 1.7, 1000);
+    this.globe.flyTo(target.lat, target.lon, 1.7);
 
     const playerIdx = this.race.turn;
     this.race.scores[playerIdx] += result.totalPoints;

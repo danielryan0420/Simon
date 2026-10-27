@@ -1,11 +1,7 @@
 /** Renders a flat equirectangular "Learned" map, shading in countries the player has mastered. */
 
 import { loadWorldGeo } from "../data/worldGeo";
-
-/** Natural Earth name overrides for countries whose gameplay name differs. */
-const NAME_ALIASES: Record<string, string> = {
-  "United States": "United States of America",
-};
+import { NATURAL_EARTH_NAME_ALIASES } from "../data/countryNameAliases";
 
 function project(lon: number, lat: number, width: number, height: number): [number, number] {
   const x = ((lon + 180) / 360) * width;
@@ -42,7 +38,7 @@ export async function renderLearnedMap(
 
   const resolvedLearned = new Set<string>();
   for (const name of learnedCountryNames) {
-    resolvedLearned.add(NAME_ALIASES[name] ?? name);
+    resolvedLearned.add(NATURAL_EARTH_NAME_ALIASES[name] ?? name);
   }
 
   for (const feature of geo.features) {

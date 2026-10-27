@@ -9,11 +9,27 @@ import { ConfettiSystem } from "./confetti";
 import { getTheme } from "./themes";
 import { getSkin } from "./skins";
 import { resolvePinColor, type PinKind } from "./pinColors";
+import { clampAngularStep, flyToDurationMs, timeNormalizedDampingFactor, zoomScaledRotateSpeed } from "./rotationMath";
 
 const GLOBE_RADIUS = 1;
 const MIN_DISTANCE = 1.35;
 const MAX_DISTANCE = 3.2;
 const BORDER_RADIUS = GLOBE_RADIUS * 1.004;
+
+// Camera's starting distance — the distance at which BASE_ROTATE_SPEED was tuned to feel right.
+const REFERENCE_DISTANCE = 2.4;
+const BASE_ROTATE_SPEED = 0.5;
+const MIN_ROTATE_SPEED = 0.15;
+const MAX_ROTATE_SPEED = 1.2;
+const BASE_DAMPING_FACTOR = 0.08;
+// Generous enough to never interfere with a fast flick, but caps runaway spin
+// from any frame hitch or stacked-up pointer events: ~2.5 full turns/sec.
+const MAX_ANGULAR_VELOCITY_RAD_PER_SEC = Math.PI * 5;
+const FLY_TO_ANGULAR_SPEED_RAD_PER_SEC = Math.PI / 1.4;
+const FLY_TO_MIN_DURATION_MS = 500;
+const FLY_TO_MAX_DURATION_MS = 2200;
+// Guards against a huge delta after a tab switch / debugger pause being treated as one real frame.
+const MAX_FRAME_DELTA_MS = 250;
 
 export interface GlobeOptions {
   onTap?: (lat: number, lon: number) => void;
@@ -80,11 +96,11 @@ export class GlobeScene {
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.08;
+    this.controls.dampingFactor = BASE_DAMPING_FACTOR;
     this.controls.minDistance = MIN_DISTANCE;
     this.controls.maxDistance = MAX_DISTANCE;
     this.controls.enablePan = false;
-    this.controls.rotateSpeed = 0.5;
+    this.controls.rotateSpeed = BASE_ROTATE_SPEED;
     this.controls.zoomSpeed = 0.7;
     this.controls.autoRotate = true;
     this.controls.autoRotateSpeed = 0.4;
@@ -220,15 +236,28 @@ export class GlobeScene {
     return vector3ToLatLon(p.x, p.y, p.z);
   }
 
-  /** Smoothly orbits the camera so the given lat/lon faces the viewer. */
-  flyTo(lat: number, lon: number, distance = 1.8, duration = 1400): Promise<void> {
-    const effectiveDuration = this.reducedMotion ? Math.min(250, duration) : duration;
+  /**
+   * Smoothly orbits the camera so the given lat/lon faces the viewer. Duration
+   * is derived from a fixed angular speed (not a flat constant), so a trip
+   * halfway around the globe doesn't have to whip around just to finish in the
+   * same time as a short hop next door.
+   */
+  flyTo(lat: number, lon: number, distance = 1.8): Promise<void> {
     return new Promise((resolve) => {
       const [tx, ty, tz] = latLonToVector3(lat, lon, 1);
       const targetDir = new THREE.Vector3(tx, ty, tz).normalize();
       const startPos = this.camera.position.clone();
       const startDist = startPos.length();
       const startDir = startPos.clone().normalize();
+
+      const angularDistance = Math.acos(Math.max(-1, Math.min(1, startDir.dot(targetDir))));
+      const duration = flyToDurationMs(
+        angularDistance,
+        FLY_TO_ANGULAR_SPEED_RAD_PER_SEC,
+        FLY_TO_MIN_DURATION_MS,
+        FLY_TO_MAX_DURATION_MS
+      );
+      const effectiveDuration = this.reducedMotion ? Math.min(250, duration) : duration;
 
       const wasAutoRotate = this.controls.autoRotate;
       this.controls.autoRotate = false;
@@ -328,11 +357,28 @@ export class GlobeScene {
   }
 
   private tick = (now: number): void => {
-    const delta = now - this.lastTime;
+    const rawDelta = now - this.lastTime;
     this.lastTime = now;
+    // Clamp so a backgrounded-tab / debugger pause isn't treated as one real frame.
+    const delta = Math.min(rawDelta, MAX_FRAME_DELTA_MS);
+    const deltaSeconds = delta / 1000;
 
-    this.clouds.rotation.y += delta * 0.00002;
-    this.controls.update();
+    this.clouds.rotation.y += deltaSeconds * 0.02;
+
+    const distance = this.camera.position.length();
+    this.controls.rotateSpeed = zoomScaledRotateSpeed(
+      BASE_ROTATE_SPEED,
+      distance,
+      GLOBE_RADIUS,
+      REFERENCE_DISTANCE,
+      MIN_ROTATE_SPEED,
+      MAX_ROTATE_SPEED
+    );
+    this.controls.dampingFactor = timeNormalizedDampingFactor(BASE_DAMPING_FACTOR, deltaSeconds);
+
+    const prevDir = this.camera.position.clone().normalize();
+    this.controls.update(deltaSeconds);
+    this.clampAngularVelocity(prevDir, deltaSeconds);
 
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
@@ -348,6 +394,22 @@ export class GlobeScene {
     this.renderer.render(this.scene, this.camera);
     this.raf = requestAnimationFrame(this.tick);
   };
+
+  /**
+   * Safety net against any runaway per-frame rotation (e.g. stacked-up pointer
+   * events, a long frame hitch) by capping how far the camera can move around
+   * the globe in one tick to a fixed angular velocity.
+   */
+  private clampAngularVelocity(prevDir: THREE.Vector3, deltaSeconds: number): void {
+    const distance = this.camera.position.length();
+    const newDir = this.camera.position.clone().normalize();
+    const angle = Math.acos(Math.max(-1, Math.min(1, prevDir.dot(newDir))));
+    if (angle < 1e-9) return;
+    const clampedAngle = clampAngularStep(angle, deltaSeconds, MAX_ANGULAR_VELOCITY_RAD_PER_SEC);
+    if (clampedAngle === angle) return;
+    const clampedDir = slerpUnitVectors(prevDir, newDir, clampedAngle / angle);
+    this.camera.position.copy(clampedDir.multiplyScalar(distance));
+  }
 
   dispose(): void {
     cancelAnimationFrame(this.raf);
