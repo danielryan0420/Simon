@@ -10,6 +10,9 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+  /* Height of the fixed mute/music button row (44px icon button + 8px gap),
+     reserved so in-flow HUD content never renders underneath it. */
+  --topbar-controls-h: 52px;
 }
 
 * {
@@ -231,6 +234,9 @@ h2 {
   align-items: flex-end;
   font-size: 0.85rem;
   min-width: 90px;
+  /* Clears the fixed mute/music buttons pinned to the top-right corner so
+     the score/streak pills never render underneath them (iPhone HUD bug). */
+  margin-top: var(--topbar-controls-h);
 }
 
 .pill {

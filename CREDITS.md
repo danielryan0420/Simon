@@ -41,14 +41,15 @@ modifications beyond resizing were made upstream; files are used unmodified.
   rasterized locally. No external icon assets used. Released under the same
   license as this repository.
 
-## Flags (Flags mode, `src/data/flagSpecs.ts` + `src/render/flagSvg.ts`)
+## Flags (Flags mode, `src/assets/flags/*.svg`)
 
-- Flag artwork is generated at runtime from small declarative specs (stripes,
-  cantons, stars, circles, simple polygons) rather than traced from any
-  third-party flag image set. National flag designs are official government
-  symbols and not subject to copyright, so these are original, simplified
-  vector reproductions authored for this project — no external SVG files or
-  icon packs are bundled.
+- Flag artwork is bundled from the [`flag-icons`](https://github.com/lipis/flag-icons)
+  npm package (v7.6.0), MIT licensed — see `src/assets/flags/LICENSE` for the
+  full text. SVGs are copied locally at `src/assets/flags/<country-id>.svg`
+  and inlined into the app bundle at build time (`src/data/flags.ts`), so
+  there is no hotlinking and no network dependency; the PWA works fully
+  offline. Each file keeps its true aspect ratio (e.g. Switzerland is square;
+  Nepal is non-rectangular), so nothing is stretched to a fixed box.
 
 ## Sound effects & music
 
