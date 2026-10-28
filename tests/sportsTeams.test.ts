@@ -71,6 +71,15 @@ describe("MLB_TEAMS and NBA_TEAMS", () => {
     expect(athletics.fact.toLowerCase()).toContain("las vegas");
   });
 
+  it("gives every team a non-empty city, a non-empty venue, and valid world coordinates", () => {
+    for (const t of SPORTS_TEAMS) {
+      expect(t.city.trim().length).toBeGreaterThan(0);
+      expect(t.venue.trim().length).toBeGreaterThan(0);
+      expect(isValidLat(t.lat)).toBe(true);
+      expect(isValidLon(t.lon)).toBe(true);
+    }
+  });
+
   it("resolves teamById for a known id and returns undefined for an unknown one", () => {
     expect(teamById("mlb-nyy")?.name).toBe("New York Yankees");
     expect(teamById("nope")).toBeUndefined();
