@@ -28,6 +28,9 @@ describe("loadSave", () => {
     expect(data.detectiveCasesSolved).toBe(0);
     expect(data.detectiveFlawlessSolves).toBe(0);
     expect(data.detectiveBestScore).toBe(0);
+    expect(data.sportsRoundsPlayed).toBe(0);
+    expect(data.sportsBestScore).toBe(0);
+    expect(data.sportsReverseCorrect).toBe(0);
   });
 
   it("round-trips through saveSave", () => {

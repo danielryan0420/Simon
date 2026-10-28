@@ -374,6 +374,64 @@ h2 {
   margin: 4px 0;
 }
 
+.sports-badge-img {
+  width: 96px;
+  max-width: 40vw;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.4));
+}
+
+.sports-badge-img svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.sports-badge-img-sm {
+  width: 44px;
+  flex-shrink: 0;
+}
+
+.sports-badge-img-sm svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.sports-choice-grid {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: min(480px, 100%);
+  margin: 0 auto;
+}
+
+.sports-choice-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  min-height: 60px;
+}
+
+.sports-choice-btn .choice-name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.hometown-ribbon {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ffd23f, #ff8a4c);
+  color: #1a1200;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .row-stat {
   display: flex;
   justify-content: space-between;

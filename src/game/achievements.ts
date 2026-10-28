@@ -1,6 +1,7 @@
 import { COUNTRIES } from "../data/countries";
 import { LANDMARKS } from "../data/landmarks";
 import { US_STATES } from "../data/usStates";
+import { MLB_TEAM_IDS, NBA_TEAM_IDS } from "./sportsMap";
 import type { Region } from "../data/types";
 import { CAMPAIGN_REGIONS } from "./campaign";
 import { levelForXp } from "./progression";
@@ -154,6 +155,42 @@ export const ACHIEVEMENTS: Achievement[] = [
     icon: "\u{1F9E0}",
     description: "Solve 10 Globe Detective cases using only the first clue.",
     isUnlocked: (s) => s.detectiveFlawlessSolves >= 10,
+  },
+
+  {
+    id: "sports-1",
+    name: "Rookie Scout",
+    icon: "\u{26BE}",
+    description: "Play your first Sports Map round.",
+    isUnlocked: (s) => s.sportsRoundsPlayed >= 1,
+  },
+  {
+    id: "sports-mlb-all",
+    name: "All 30 Ballparks",
+    icon: "\u{26BE}",
+    description: "Find the home city of every MLB team.",
+    isUnlocked: (s) => allLearned(s, MLB_TEAM_IDS),
+  },
+  {
+    id: "sports-nba-all",
+    name: "All 30 Arenas",
+    icon: "\u{1F3C0}",
+    description: "Find the home city of every NBA team.",
+    isUnlocked: (s) => allLearned(s, NBA_TEAM_IDS),
+  },
+  {
+    id: "sports-all-60",
+    name: "Sports Completionist",
+    icon: "\u{1F3C6}",
+    description: "Find the home city of every MLB and NBA team.",
+    isUnlocked: (s) => allLearned(s, [...MLB_TEAM_IDS, ...NBA_TEAM_IDS]),
+  },
+  {
+    id: "sports-reverse-10",
+    name: "Team Spotter",
+    icon: "\u{1F50D}",
+    description: "Correctly name 10 teams in the 'Which Team Plays Here?' round.",
+    isUnlocked: (s) => s.sportsReverseCorrect >= 10,
   },
 ];
 

@@ -8,7 +8,7 @@ const SETTINGS_KEY = "geo-racer:settings:v1";
 
 export interface LeaderboardEntry {
   name: string;
-  mode: Mode;
+  mode: Mode | "sports-mlb" | "sports-nba" | "sports-mixed";
   score: number;
   date: string;
 }
@@ -63,6 +63,10 @@ export interface SaveData {
   detectiveCasesSolved: number;
   detectiveFlawlessSolves: number;
   detectiveBestScore: number;
+  /** Sports Map: rounds played, best single-round score, and correct "which team plays here?" reverse guesses. */
+  sportsRoundsPlayed: number;
+  sportsBestScore: number;
+  sportsReverseCorrect: number;
   /** Family weekly leaderboard: resets every ISO week (see isoWeekKey). */
   weeklyScore: number;
   weekKey: string;
@@ -92,6 +96,9 @@ export function defaultSave(): SaveData {
     detectiveCasesSolved: 0,
     detectiveFlawlessSolves: 0,
     detectiveBestScore: 0,
+    sportsRoundsPlayed: 0,
+    sportsBestScore: 0,
+    sportsReverseCorrect: 0,
     weeklyScore: 0,
     weekKey: isoWeekKey(),
     bestWeeklyScore: 0,

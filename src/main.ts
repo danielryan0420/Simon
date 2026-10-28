@@ -63,6 +63,18 @@ import {
   type ClueKind,
   type DetectiveCase,
 } from "./game/detective";
+import {
+  badgeSvgFor,
+  buildReverseChoices,
+  buildSportsRoundQueue,
+  pointsForReverseGuess,
+  scoreSportsGuess,
+  SPORTS_ROUND_LENGTH,
+  teamsForLeague,
+  xpForSportsPoints,
+  type LeagueFilter,
+} from "./game/sportsMap";
+import type { SportsTeam } from "./data/sportsTeams";
 import type { Difficulty, GeoTarget, Region } from "./data/types";
 
 function starString(n: number): string {
@@ -76,6 +88,23 @@ const DIFFICULTIES: { id: Difficulty; label: string }[] = [
   { id: "ace", label: "Ace" },
   { id: "hard", label: "Hard" },
 ];
+
+type SportsRoundKind = "find" | "name";
+
+const LEAGUE_CHIPS: { id: LeagueFilter; label: string }[] = [
+  { id: "MLB", label: "\u{26BE} MLB" },
+  { id: "NBA", label: "\u{1F3C0} NBA" },
+  { id: "mixed", label: "\u{1F3C6} Mixed" },
+];
+
+const SPORTS_KIND_CHIPS: { id: SportsRoundKind; label: string }[] = [
+  { id: "find", label: "\u{1F4CD} Find the City" },
+  { id: "name", label: "❓ Name the Team" },
+];
+
+/** Camera target that frames the continental US and Canada (Toronto included) at round start. */
+const NORTH_AMERICA_CENTER = { lat: 41, lon: -96 };
+const NORTH_AMERICA_ZOOM = 1.6;
 
 type Screen =
   | "home"
@@ -100,7 +129,11 @@ type Screen =
   | "family"
   | "detectivePlaying"
   | "detectiveCaseResult"
-  | "detectiveSummary";
+  | "detectiveSummary"
+  | "sportsSetup"
+  | "sportsPlaying"
+  | "sportsRoundResult"
+  | "sportsSummary";
 
 interface TutorialStep {
   icon: string;
@@ -169,6 +202,22 @@ interface DetectiveState {
   advanceHandle: number | null;
 }
 
+interface SportsRoundState {
+  kind: SportsRoundKind;
+  league: LeagueFilter;
+  queue: SportsTeam[];
+  index: number;
+  score: number;
+  streak: number;
+  xpEarned: number;
+  reverseCorrect: number;
+  questionStart: number;
+  timeoutHandle: number | null;
+  tickHandle: number | null;
+  /** Multiple-choice options for the current "Name the Team" question, rebuilt per question. */
+  choices: SportsTeam[];
+}
+
 class GeoRacerApp {
   private uiContent: HTMLElement;
   private globe: GlobeScene;
@@ -187,6 +236,10 @@ class GeoRacerApp {
   private timeAttackClockEl: HTMLElement | null = null;
   private detective: DetectiveState | null = null;
   private lastDetectiveResult: { detectiveCase: DetectiveCase; cluesRevealed: number; points: number } | null = null;
+  private sports: SportsRoundState | null = null;
+  private pendingSportsLeague: LeagueFilter = "MLB";
+  private pendingSportsKind: SportsRoundKind = "find";
+  private lastSportsResult: { team: SportsTeam; kind: SportsRoundKind; score: AnswerScore | null; points: number; correct: boolean } | null = null;
   private lastResult: { target: GeoTarget; score: AnswerScore; mode: Mode } | null = null;
   private raceLastResult: { target: GeoTarget; scores: [AnswerScore, AnswerScore] } | null = null;
   private activeTapHandler: ((lat: number, lon: number) => void) | null = null;
@@ -415,6 +468,7 @@ class GeoRacerApp {
       el("button", { class: "btn", onClick: () => this.renderWorldTour() }, ["\u{1F30E} World Tour"]),
       el("button", { class: "btn", onClick: () => this.startTimeAttack() }, ["⏱️ Time Attack"]),
       el("button", { class: "btn", onClick: () => this.startDetective() }, ["\u{1F575}️ Globe Detective"]),
+      el("button", { class: "btn", onClick: () => this.renderSportsSetup() }, ["\u{26BE} Sports Map"]),
       el("button", { class: "btn", onClick: () => this.renderRaceSetup() }, ["\u{1F3C1} 2-Player Race"]),
       el("button", { class: "btn", onClick: () => this.renderProfiles() }, ["\u{1F46A} Family & Profiles"]),
       el("button", { class: "btn", onClick: () => this.renderLearned() }, ["\u{1F5FA}️ Learned Map"]),
@@ -1197,6 +1251,296 @@ class GeoRacerApp {
     this.clearDetectiveAdvanceTimer();
     this.activeTapHandler = null;
     this.detective = null;
+    this.renderHome();
+  }
+
+  // ---------- SPORTS MAP ----------
+  private renderSportsSetup(): void {
+    this.setScreen("sportsSetup");
+    this.globe.setAutoRotate(true);
+    this.globe.clearPins();
+    let league = this.pendingSportsLeague;
+    let kind = this.pendingSportsKind;
+
+    const render = () => {
+      const leagueRow = el("div", { class: "chip-row" }, LEAGUE_CHIPS.map((c) =>
+        chip(c.label, league === c.id, () => {
+          league = c.id;
+          this.pendingSportsLeague = league;
+          render();
+        })
+      ));
+      const kindRow = el("div", { class: "chip-row" }, SPORTS_KIND_CHIPS.map((c) =>
+        chip(c.label, kind === c.id, () => {
+          kind = c.id;
+          this.pendingSportsKind = kind;
+          render();
+        })
+      ));
+      const panel = el("div", { class: "screen-center" }, [
+        el("h2", {}, ["\u{26BE} Sports Map \u{1F3C0}"]),
+        el("p", { class: "small-muted" }, ["Pick a league, then find each team's home city on the globe — zoomed in on North America."]),
+        el("div", { class: "small-muted" }, ["League"]),
+        leagueRow,
+        el("div", { class: "small-muted" }, ["Round type"]),
+        kindRow,
+        el("button", { class: "btn btn-primary", onClick: () => this.startSportsRound(kind, league) }, ["Start \u{1F3DF}️"]),
+        el("button", { class: "btn", onClick: () => this.renderHome() }, ["← Back"]),
+      ]);
+      clear(this.uiContent);
+      this.uiContent.append(panel);
+    };
+    render();
+  }
+
+  private startSportsRound(kind: SportsRoundKind, league: LeagueFilter): void {
+    const rng = mulberry32(Date.now() & 0xffffffff);
+    const queue = buildSportsRoundQueue(league, SPORTS_ROUND_LENGTH, rng);
+    this.sports = {
+      kind,
+      league,
+      queue,
+      index: 0,
+      score: 0,
+      streak: 0,
+      xpEarned: 0,
+      reverseCorrect: 0,
+      questionStart: 0,
+      timeoutHandle: null,
+      tickHandle: null,
+      choices: [],
+    };
+    this.playSportsQuestion();
+  }
+
+  private clearSportsTimers(): void {
+    if (this.sports?.tickHandle) window.clearInterval(this.sports.tickHandle);
+    if (this.sports?.timeoutHandle) window.clearTimeout(this.sports.timeoutHandle);
+    if (this.sports) {
+      this.sports.tickHandle = null;
+      this.sports.timeoutHandle = null;
+    }
+  }
+
+  private playSportsQuestion(): void {
+    if (!this.sports) return;
+    this.setScreen("sportsPlaying");
+    this.globe.setAutoRotate(false);
+    this.globe.clearPins();
+
+    const target = this.sports.queue[this.sports.index];
+    this.sports.questionStart = performance.now();
+
+    const quitBtn = el("button", { class: "icon-btn", "aria-label": "Quit Sports Map", onClick: () => this.confirmQuitSports() }, ["✕"]);
+    const scorePill = el("div", { class: "pill" }, [`Score ${this.sports.score}`]);
+    const streakPill = el("div", { class: `pill ${this.sports.streak > 0 ? "combo-pill" : ""}` }, [
+      this.sports.streak > 0 ? `\u{1F525} x${this.sports.streak}` : "No streak",
+    ]);
+
+    if (this.sports.kind === "find") {
+      this.globe.flyTo(NORTH_AMERICA_CENTER.lat, NORTH_AMERICA_CENTER.lon, NORTH_AMERICA_ZOOM);
+
+      const promptBanner = el("div", { class: "prompt-banner prompt-banner-flag" }, [
+        el("div", { class: "sports-badge-img", html: badgeSvgFor(target) }),
+        el("div", {}, [`Tap ${target.name}'s home city!`]),
+        target.isHometown ? el("div", { class: "hometown-ribbon" }, ["\u{1F3E0} Hometown Team!"]) : el("div"),
+      ]);
+      const hudTop = el("div", { class: "hud-top" }, [quitBtn, promptBanner, el("div", { class: "hud-stats" }, [scorePill, streakPill])]);
+      const timerFill = el("div", { class: "timer-bar-fill", style: "width:100%;" });
+      const timerTrack = el("div", { class: "timer-bar-track" }, [timerFill]);
+      const progress = el("div", { class: "hud-bottom" }, [
+        el("div", { class: "pill" }, [`Q${this.sports.index + 1} / ${this.sports.queue.length}`]),
+      ]);
+
+      clear(this.uiContent);
+      this.uiContent.append(hudTop, timerTrack, progress);
+      sfx.playUiOpen();
+
+      const tick = window.setInterval(() => {
+        const elapsed = performance.now() - this.sports!.questionStart;
+        const pct = Math.max(0, 1 - elapsed / ANSWER_TIMEOUT_MS);
+        timerFill.style.width = `${pct * 100}%`;
+      }, 100);
+      this.sports.tickHandle = tick;
+
+      this.sports.timeoutHandle = window.setTimeout(() => {
+        const hit = this.globe.raycastPointer(window.innerWidth / 2, window.innerHeight / 2);
+        this.submitSportsFind(hit?.lat ?? target.lat + 40, hit?.lon ?? target.lon + 40);
+      }, ANSWER_TIMEOUT_MS);
+
+      this.activeTapHandler = (lat, lon) => this.submitSportsFind(lat, lon);
+      return;
+    }
+
+    // "name" kind: drop a pin right on the venue and ask the player to pick the team from a few choices.
+    const choiceRng = mulberry32((Date.now() + this.sports.index * 7919) & 0xffffffff);
+    this.sports.choices = buildReverseChoices(target, teamsForLeague(this.sports.league), choiceRng);
+    this.globe.dropPin(target.lat, target.lon, "target");
+    this.globe.flyTo(target.lat, target.lon, NORTH_AMERICA_ZOOM);
+
+    const promptBanner = el("div", { class: "prompt-banner" }, ["❓ Which team plays here?"]);
+    const hudTop = el("div", { class: "hud-top" }, [quitBtn, promptBanner, el("div", { class: "hud-stats" }, [scorePill, streakPill])]);
+    const choiceGrid = el("div", { class: "sports-choice-grid" }, this.sports.choices.map((choice) =>
+      el("button", { class: "btn sports-choice-btn", onClick: () => this.submitSportsChoice(choice, target) }, [
+        el("div", { class: "sports-badge-img-sm", html: badgeSvgFor(choice) }),
+        el("div", { class: "choice-name" }, [choice.name]),
+      ])
+    ));
+    const bottomArea = el("div", { class: "hud-bottom", style: "flex-direction:column; justify-content:flex-start; align-items:center; width:100%; gap:10px;" }, [
+      el("div", { class: "pill" }, [`Q${this.sports.index + 1} / ${this.sports.queue.length}`]),
+      choiceGrid,
+    ]);
+
+    clear(this.uiContent);
+    this.uiContent.append(hudTop, bottomArea);
+    sfx.playUiOpen();
+  }
+
+  private submitSportsFind(lat: number, lon: number): void {
+    if (!this.sports) return;
+    this.activeTapHandler = null;
+    this.clearSportsTimers();
+
+    const target = this.sports.queue[this.sports.index];
+    const elapsedMs = performance.now() - this.sports.questionStart;
+    const distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: target.lat, lon: target.lon });
+    const result = scoreSportsGuess(distanceKm, elapsedMs, this.sports.streak);
+
+    this.sports.streak = result.rating === "miss" ? 0 : this.sports.streak + 1;
+    this.sports.score += result.totalPoints;
+    this.sports.xpEarned += xpForAnswer(result.totalPoints, result.rating);
+    this.save.bestStreak = Math.max(this.save.bestStreak, this.sports.streak);
+    if (result.rating === "perfect") this.save.perfectCount += 1;
+    else if (result.rating === "great") this.save.greatCount += 1;
+    if (MASTERY_RATINGS.has(result.rating)) this.save = recordLearned(this.save, target.id);
+
+    this.globe.dropPin(lat, lon, result.rating === "miss" ? "miss" : "tap");
+    this.globe.launchProjectile(lat, lon, target.lat, target.lon, this.settings.selectedSkin).then(() => {
+      this.globe.dropPin(target.lat, target.lon, "target");
+      if (result.rating === "perfect" || result.rating === "great") this.globe.burstConfetti(target.lat, target.lon);
+    });
+    this.playRatingSfx(result.rating, this.sports.streak);
+    this.globe.flyTo(target.lat, target.lon, NORTH_AMERICA_ZOOM);
+
+    this.lastSportsResult = { team: target, kind: "find", score: result, points: result.totalPoints, correct: result.rating !== "miss" };
+    window.setTimeout(() => this.renderSportsRoundResult(), 650);
+  }
+
+  private submitSportsChoice(choice: SportsTeam, target: SportsTeam): void {
+    if (!this.sports) return;
+    this.activeTapHandler = null;
+    const elapsedMs = performance.now() - this.sports.questionStart;
+    const correct = choice.id === target.id;
+    const points = pointsForReverseGuess(correct, elapsedMs);
+
+    this.sports.streak = correct ? this.sports.streak + 1 : 0;
+    this.sports.score += points;
+    this.sports.xpEarned += xpForSportsPoints(points);
+    this.save.bestStreak = Math.max(this.save.bestStreak, this.sports.streak);
+
+    if (correct) {
+      this.sports.reverseCorrect += 1;
+      this.save = recordLearned(this.save, target.id);
+      this.globe.burstConfetti(target.lat, target.lon);
+      sfx.playPerfect();
+    } else {
+      sfx.playMiss();
+    }
+
+    this.lastSportsResult = { team: target, kind: "name", score: null, points, correct };
+    window.setTimeout(() => this.renderSportsRoundResult(), 500);
+  }
+
+  private renderSportsRoundResult(): void {
+    if (!this.sports || !this.lastSportsResult) return;
+    this.setScreen("sportsRoundResult");
+    const { team, kind, score, points, correct } = this.lastSportsResult;
+
+    const ratingLabel = kind === "find" ? score!.rating.toUpperCase() : correct ? "CORRECT!" : "NOT QUITE";
+    const ratingClass = kind === "find" ? `rating-${score!.rating}` : correct ? "rating-perfect" : "rating-miss";
+    const distanceRows =
+      kind === "find"
+        ? [
+            el("div", { class: "row-stat" }, [el("span", {}, ["Distance"]), el("span", {}, [`${Math.round(score!.distanceKm)} km`])]),
+            el("div", { class: "row-stat" }, [el("span", {}, ["Time bonus"]), el("span", {}, [`+${score!.timeBonus}`])]),
+          ]
+        : [];
+
+    const panel = el("div", { class: "result-card" }, [
+      el("div", { class: `rating-badge ${ratingClass}` }, [ratingLabel]),
+      el("div", { class: "score-line" }, [`+${points}`]),
+      ...distanceRows,
+      el("div", { class: "fact-card" }, [
+        el("div", { style: "display:flex; align-items:center; gap:10px; margin-bottom:6px;" }, [
+          el("div", { class: "sports-badge-img-sm", html: badgeSvgFor(team) }),
+          el("strong", {}, [team.name]),
+        ]),
+        el("div", {}, [`${team.venue} • ${team.city}`]),
+        el("div", {}, [team.fact]),
+        team.isHometown ? el("div", { class: "hometown-ribbon" }, ["\u{1F3E0} Hometown Team!"]) : el("div"),
+      ]),
+      el("button", {
+        class: "btn btn-primary",
+        onClick: () => this.nextSportsQuestion(),
+      }, [this.sports.index + 1 < this.sports.queue.length ? "Next →" : "Finish →"]),
+    ]);
+    clear(this.uiContent);
+    this.uiContent.append(panel);
+  }
+
+  private nextSportsQuestion(): void {
+    if (!this.sports) return;
+    this.sports.index += 1;
+    if (this.sports.index >= this.sports.queue.length) {
+      this.finishSportsRound();
+    } else {
+      this.playSportsQuestion();
+    }
+  }
+
+  private finishSportsRound(): void {
+    if (!this.sports) return;
+    const before = levelForXp(this.save.xp);
+    this.save.xp += this.sports.xpEarned;
+    this.save.gamesPlayed += 1;
+    this.save.sportsRoundsPlayed += 1;
+    this.save.sportsBestScore = Math.max(this.save.sportsBestScore, this.sports.score);
+    this.save.sportsReverseCorrect += this.sports.reverseCorrect;
+    const after = levelForXp(this.save.xp);
+
+    const leagueMode = this.sports.league === "mixed" ? "sports-mixed" : this.sports.league === "MLB" ? "sports-mlb" : "sports-nba";
+    this.save = addLeaderboardEntry(this.save, { name: "Player", mode: leagueMode, score: this.sports.score, date: dateKey() });
+    this.save = recordWeeklyScore(this.save, this.sports.score);
+
+    const leveledUp = after.level > before.level;
+    if (leveledUp) sfx.playLevelUp();
+    this.unlockAchievements();
+    saveSave(this.profileId, this.save);
+
+    const panel = el("div", { class: "screen-center" }, [
+      el("h2", {}, ["\u{1F3C6} Sports Map Complete!"]),
+      el("div", { class: "score-line" }, [`${this.sports.score} pts`]),
+      el("div", { class: "row-stat" }, [el("span", {}, ["XP earned"]), el("span", {}, [`+${this.sports.xpEarned}`])]),
+      el("div", { class: "row-stat" }, [el("span", {}, ["Best streak"]), el("span", {}, [`${this.save.bestStreak}`])]),
+      leveledUp
+        ? el("div", { class: "fact-card" }, [el("strong", {}, [`Level up! You're now level ${after.level} \u{1F389}`])])
+        : el("div"),
+      el("button", { class: "btn btn-primary", onClick: () => this.renderSportsSetup() }, ["Play Again \u{1F3DF}️"]),
+      el("button", { class: "btn", onClick: () => this.renderHome() }, ["\u{1F3E0} Home"]),
+    ]);
+    clear(this.uiContent);
+    this.uiContent.append(panel);
+    this.sports = null;
+    this.setScreen("sportsSummary");
+    this.globe.clearPins();
+    this.globe.setAutoRotate(true);
+  }
+
+  private confirmQuitSports(): void {
+    if (!this.sports) return;
+    this.clearSportsTimers();
+    this.activeTapHandler = null;
+    this.sports = null;
     this.renderHome();
   }
 

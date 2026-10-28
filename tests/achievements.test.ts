@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { ACHIEVEMENTS, newlyUnlockedAchievements } from "../src/game/achievements";
 import { defaultSave } from "../src/game/storage";
 import { COUNTRIES } from "../src/data/countries";
+import { MLB_TEAM_IDS, NBA_TEAM_IDS } from "../src/game/sportsMap";
 
 beforeEach(() => {
   localStorage.clear();
@@ -66,5 +67,20 @@ describe("newlyUnlockedAchievements", () => {
 
     const flawless = { ...defaultSave(), detectiveFlawlessSolves: 10 };
     expect(newlyUnlockedAchievements(flawless).map((a) => a.id)).toContain("detective-flawless-10");
+  });
+
+  it("unlocks Sports Map achievements based on rounds played, mastered teams, and reverse guesses", () => {
+    const firstRound = { ...defaultSave(), sportsRoundsPlayed: 1 };
+    expect(newlyUnlockedAchievements(firstRound).map((a) => a.id)).toContain("sports-1");
+
+    const allMlb = { ...defaultSave(), learnedIds: MLB_TEAM_IDS };
+    expect(newlyUnlockedAchievements(allMlb).map((a) => a.id)).toContain("sports-mlb-all");
+    expect(newlyUnlockedAchievements(allMlb).map((a) => a.id)).not.toContain("sports-nba-all");
+
+    const allSports = { ...defaultSave(), learnedIds: [...MLB_TEAM_IDS, ...NBA_TEAM_IDS] };
+    expect(newlyUnlockedAchievements(allSports).map((a) => a.id)).toContain("sports-all-60");
+
+    const spotter = { ...defaultSave(), sportsReverseCorrect: 10 };
+    expect(newlyUnlockedAchievements(spotter).map((a) => a.id)).toContain("sports-reverse-10");
   });
 });
