@@ -28,6 +28,18 @@ modifications beyond resizing were made upstream; files are used unmodified.
   with `topojson-client` (ISC) and coordinates rounded for size; the
   conversion script was used once and is not part of the shipped bundle.
 
+## US state & Canadian province boundaries (`public/data/us_ca_states.geojson`)
+
+- Derived from the Natural Earth 1:50m Admin-1 States and Provinces dataset
+  (`ne_50m_admin_1_states_provinces`, naturalearthdata.com), filtered to the
+  United States (50 states + DC) and Canada (13 provinces/territories).
+- Natural Earth data is public domain ("No permission is needed to use
+  Natural Earth. Give us credit where you can.").
+- Simplified with `mapshaper` (Douglas-Peucker, keeping ~30% of vertices,
+  `-clean` to repair resulting self-intersections) and rounded to 4 decimal
+  places to keep the bundled file under 160KB while preserving the small
+  states (RI, DE, CT, NJ, DC) well enough for point-in-shape scoring.
+
 ## Gameplay data (`src/data/*.ts`)
 
 - Country/capital/landmark/US-state names, approximate lat/lon coordinates,

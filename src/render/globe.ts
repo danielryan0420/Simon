@@ -3,7 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { latLonToVector3, vector3ToLatLon } from "../game/geo";
 import { createAtmosphere } from "./atmosphere";
 import { createStarfield } from "./starfield";
-import { buildBorderLines } from "./borders";
+import { buildBorderLines, buildStateBorderLines } from "./borders";
 import { Projectile } from "./trail";
 import { ConfettiSystem } from "./confetti";
 import { getTheme } from "./themes";
@@ -15,6 +15,7 @@ const GLOBE_RADIUS = 1;
 const MIN_DISTANCE = 1.35;
 const MAX_DISTANCE = 3.2;
 const BORDER_RADIUS = GLOBE_RADIUS * 1.004;
+const STATE_BORDER_RADIUS = GLOBE_RADIUS * 1.0045;
 
 // Camera's starting distance — the distance at which BASE_ROTATE_SPEED was tuned to feel right.
 const REFERENCE_DISTANCE = 2.4;
@@ -65,6 +66,7 @@ export class GlobeScene {
   readonly controls: OrbitControls;
   private earth: THREE.Mesh;
   private borders: THREE.LineSegments | null = null;
+  private stateBorders: THREE.LineSegments | null = null;
   private clouds: THREE.Mesh;
   private atmosphere: THREE.Mesh;
   private starfield: THREE.Points;
@@ -127,6 +129,11 @@ export class GlobeScene {
 
     buildBorderLines(BORDER_RADIUS).then((lines) => {
       this.borders = lines;
+      this.scene.add(lines);
+    });
+
+    buildStateBorderLines(STATE_BORDER_RADIUS).then((lines) => {
+      this.stateBorders = lines;
       this.scene.add(lines);
     });
 
@@ -417,6 +424,10 @@ export class GlobeScene {
     if (this.borders) {
       this.borders.geometry.dispose();
       (this.borders.material as THREE.Material).dispose();
+    }
+    if (this.stateBorders) {
+      this.stateBorders.geometry.dispose();
+      (this.stateBorders.material as THREE.Material).dispose();
     }
     this.renderer.domElement.removeEventListener("pointerdown", this.handlePointerDown);
     this.renderer.domElement.removeEventListener("pointerup", this.handlePointerUp);

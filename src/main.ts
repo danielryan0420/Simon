@@ -8,7 +8,8 @@ import { mulberry32, shuffle } from "./game/rng";
 import { greatCircleDistanceKm } from "./game/geo";
 import { scoreAnswer, type AnswerScore, type Rating } from "./game/scoring";
 import { countryContainsPoint } from "./game/countryHitTest";
-import { loadWorldGeo, type GeoCollection } from "./data/worldGeo";
+import { stateContainsPoint } from "./game/stateHitTest";
+import { loadWorldGeo, loadStatesGeo, type GeoCollection } from "./data/worldGeo";
 import { levelForXp, xpForAnswer, newlyUnlockedForLevel, unlockedAtLevel, UNLOCKABLES } from "./game/progression";
 import {
   loadSave,
@@ -50,6 +51,8 @@ import {
   nextAvatar,
   nextColor,
   weeklyLeaderboard,
+  activeProfileMeta,
+  leaderboardEntryForActiveProfile,
   type ProfilesData,
 } from "./game/profiles";
 import { migrateLegacySave } from "./game/migration";
@@ -249,6 +252,7 @@ class GeoRacerApp {
   private tutorialTimer: number | null = null;
   private tutorialRaf: number | null = null;
   private countryGeo: GeoCollection | null = null;
+  private stateGeo: GeoCollection | null = null;
 
   constructor(globeRoot: HTMLElement, uiRoot: HTMLElement) {
     migrateLegacySave();
@@ -262,6 +266,9 @@ class GeoRacerApp {
     this.applyAccessibility();
     loadWorldGeo().then((geo) => {
       this.countryGeo = geo;
+    });
+    loadStatesGeo().then((geo) => {
+      this.stateGeo = geo;
     });
 
     const reducedMotionMedia = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -448,7 +455,7 @@ class GeoRacerApp {
     this.globe.clearPins();
     const level = levelForXp(this.save.xp);
     const xpPct = Math.min(100, Math.round((level.xpIntoLevel / level.xpForNextLevel) * 100));
-    const activeProfile = this.profiles.profiles.find((p) => p.id === this.profileId);
+    const activeProfile = activeProfileMeta(this.profiles);
     const panel = el("div", { class: "screen-center" }, [
       el("div", { class: "logo" }, ["GEO RACER"]),
       el("div", { class: "subtitle" }, [`Level ${level.level} explorer`]),
@@ -700,6 +707,17 @@ class GeoRacerApp {
     return countryContainsPoint(this.countryGeo, target.name, lat, lon).hit;
   }
 
+  /**
+   * For States mode, a tap anywhere inside the target state's actual borders
+   * counts as a dead-center hit, the same way isCountryShapeHit works for
+   * countries. Falls back to false (plain distance scoring) until the state
+   * border data has loaded or if a state has no bundled polygon.
+   */
+  private isStateShapeHit(target: GeoTarget, lat: number, lon: number): boolean {
+    if (!this.stateGeo) return false;
+    return stateContainsPoint(this.stateGeo, target.name, lat, lon).hit;
+  }
+
   private submitAnswer(lat: number, lon: number): void {
     if (!this.round) return;
     this.activeTapHandler = null;
@@ -708,8 +726,10 @@ class GeoRacerApp {
     const target = this.round.queue[this.round.index];
     const elapsedMs = performance.now() - this.round.questionStart;
     const usesCountryShape = this.round.mode === "countries" || this.round.mode === "flags";
+    const usesStateShape = this.round.mode === "states";
     let distanceKm = greatCircleDistanceKm({ lat, lon }, { lat: target.lat, lon: target.lon });
     if (usesCountryShape && this.isCountryShapeHit(target, lat, lon)) distanceKm = 0;
+    if (usesStateShape && this.isStateShapeHit(target, lat, lon)) distanceKm = 0;
     const difficulty = target.difficulty;
     const result = scoreAnswer(distanceKm, elapsedMs, difficulty, this.round.streak);
     this.round.ratings.push(result.rating);
@@ -795,12 +815,10 @@ class GeoRacerApp {
       this.save.lastDailyScore = this.round.score;
     }
 
-    this.save = addLeaderboardEntry(this.save, {
-      name: "Player",
-      mode: this.round.mode,
-      score: this.round.score,
-      date: dateKey(),
-    });
+    this.save = addLeaderboardEntry(
+      this.save,
+      leaderboardEntryForActiveProfile(this.profiles, this.round.mode, this.round.score, dateKey())
+    );
     this.save = recordWeeklyScore(this.save, this.round.score);
 
     const leveledUp = after.level > before.level;
@@ -1509,7 +1527,10 @@ class GeoRacerApp {
     const after = levelForXp(this.save.xp);
 
     const leagueMode = this.sports.league === "mixed" ? "sports-mixed" : this.sports.league === "MLB" ? "sports-mlb" : "sports-nba";
-    this.save = addLeaderboardEntry(this.save, { name: "Player", mode: leagueMode, score: this.sports.score, date: dateKey() });
+    this.save = addLeaderboardEntry(
+      this.save,
+      leaderboardEntryForActiveProfile(this.profiles, leagueMode, this.sports.score, dateKey())
+    );
     this.save = recordWeeklyScore(this.save, this.sports.score);
 
     const leveledUp = after.level > before.level;
@@ -1847,7 +1868,9 @@ class GeoRacerApp {
     const level = levelForXp(this.save.xp);
     const rows = this.save.leaderboard.map((entry) =>
       el("tr", {}, [
-        el("td", {}, [entry.name]),
+        el("td", { style: entry.color ? `color:${entry.color};` : "" }, [
+          entry.avatar ? `${entry.avatar} ${entry.name}` : entry.name,
+        ]),
         el("td", {}, [entry.mode]),
         el("td", {}, [`${entry.score}`]),
         el("td", {}, [entry.date]),

@@ -1,4 +1,4 @@
-const CACHE_VERSION = "geo-racer-v3";
+const CACHE_VERSION = "geo-racer-v4";
 const BASE = self.registration ? new URL(self.registration.scope).pathname : "/";
 
 const PRECACHE_URLS = [
@@ -9,6 +9,7 @@ const PRECACHE_URLS = [
   `${BASE}textures/earth_specular_2048.jpg`,
   `${BASE}textures/earth_clouds_1024.png`,
   `${BASE}data/countries.geojson`,
+  `${BASE}data/us_ca_states.geojson`,
   `${BASE}icons/icon-192.png`,
   `${BASE}icons/icon-512.png`,
 ];

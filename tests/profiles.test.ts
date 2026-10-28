@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   AVATARS,
   PROFILE_COLORS,
+  activeProfileMeta,
   addProfile,
   ensureActiveProfile,
+  leaderboardEntryForActiveProfile,
   loadProfiles,
   nextAvatar,
   nextColor,
@@ -12,7 +14,7 @@ import {
   setActiveProfile,
   weeklyLeaderboard,
 } from "../src/game/profiles";
-import { loadSave, recordWeeklyScore, saveSave } from "../src/game/storage";
+import { addLeaderboardEntry, loadSave, recordWeeklyScore, saveSave } from "../src/game/storage";
 
 beforeEach(() => {
   localStorage.clear();
@@ -110,6 +112,42 @@ describe("ensureActiveProfile", () => {
   it("leaves a valid state untouched", () => {
     const data = addProfile(loadProfiles(), "Sam");
     expect(ensureActiveProfile(data)).toEqual(data);
+  });
+});
+
+describe("activeProfileMeta", () => {
+  it("returns the active profile's metadata", () => {
+    let data = addProfile(loadProfiles(), "Sam");
+    data = addProfile(data, "Alex");
+    const alexId = data.profiles[1].id;
+    data = setActiveProfile(data, alexId);
+    expect(activeProfileMeta(data)?.name).toBe("Alex");
+  });
+
+  it("returns null when there is no active profile", () => {
+    expect(activeProfileMeta(loadProfiles())).toBeNull();
+  });
+});
+
+describe("leaderboardEntryForActiveProfile", () => {
+  it("records a finished round under the active profile's name, avatar, and color", () => {
+    let data = addProfile(loadProfiles(), "Sam");
+    data = addProfile(data, "Alex");
+    data = setActiveProfile(data, data.profiles[1].id);
+
+    const entry = leaderboardEntryForActiveProfile(data, "countries", 900, "2026-10-27");
+    expect(entry.name).toBe("Alex");
+    expect(entry.avatar).toBe(data.profiles[1].avatar);
+    expect(entry.color).toBe(data.profiles[1].color);
+
+    const save = addLeaderboardEntry(loadSave(data.profiles[1].id), entry);
+    expect(save.leaderboard[0].name).toBe("Alex");
+  });
+
+  it("falls back to 'Player 1' when there is no active profile", () => {
+    const entry = leaderboardEntryForActiveProfile(loadProfiles(), "countries", 500, "2026-10-27");
+    expect(entry.name).toBe("Player 1");
+    expect(entry.avatar).toBeUndefined();
   });
 });
 

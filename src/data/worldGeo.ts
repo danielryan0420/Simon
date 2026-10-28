@@ -20,3 +20,14 @@ export function loadWorldGeo(): Promise<GeoCollection> {
   }
   return cached;
 }
+
+/** Bundled US state + Canadian province boundaries (see CREDITS.md). */
+let cachedStatesGeo: Promise<GeoCollection> | null = null;
+
+export function loadStatesGeo(): Promise<GeoCollection> {
+  if (!cachedStatesGeo) {
+    const base = import.meta.env.BASE_URL;
+    cachedStatesGeo = fetch(`${base}data/us_ca_states.geojson`).then((res) => res.json());
+  }
+  return cachedStatesGeo;
+}

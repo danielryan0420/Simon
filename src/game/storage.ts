@@ -11,6 +11,8 @@ export interface LeaderboardEntry {
   mode: Mode | "sports-mlb" | "sports-nba" | "sports-mixed";
   score: number;
   date: string;
+  avatar?: string;
+  color?: string;
 }
 
 export interface AccessibilitySettings {

@@ -1,4 +1,4 @@
-import { isoWeekKey, loadSave } from "./storage";
+import { isoWeekKey, loadSave, type LeaderboardEntry } from "./storage";
 
 const KEY = "geo-racer:profiles:v1";
 
@@ -84,6 +84,29 @@ export function removeProfile(data: ProfilesData, id: string): ProfilesData {
 export function setActiveProfile(data: ProfilesData, id: string): ProfilesData {
   if (!data.profiles.some((p) => p.id === id)) return data;
   return { ...data, activeProfileId: id };
+}
+
+/** Looks up the currently active profile's metadata, or null if none is set/found. */
+export function activeProfileMeta(data: ProfilesData): ProfileMeta | null {
+  return data.profiles.find((p) => p.id === data.activeProfileId) ?? null;
+}
+
+/** Builds a leaderboard entry attributed to the active profile, falling back to "Player 1". */
+export function leaderboardEntryForActiveProfile(
+  data: ProfilesData,
+  mode: LeaderboardEntry["mode"],
+  score: number,
+  date: string
+): LeaderboardEntry {
+  const profile = activeProfileMeta(data);
+  return {
+    name: profile?.name ?? "Player 1",
+    mode,
+    score,
+    date,
+    avatar: profile?.avatar,
+    color: profile?.color,
+  };
 }
 
 /** Guarantees there's always a valid active profile, creating a default one if needed. */
