@@ -89,6 +89,18 @@ describe("loadSettings / saveSettings", () => {
     const settings = loadSettings();
     expect(settings.accessibility).toEqual({ largeText: true, colorBlindMode: false, reducedMotion: false });
   });
+
+  it("defaults seenHowTo to empty and round-trips updates to it", () => {
+    expect(loadSettings().seenHowTo).toEqual({});
+    const settings = { ...loadSettings(), seenHowTo: { countries: true } };
+    saveSettings(settings);
+    expect(loadSettings().seenHowTo).toEqual({ countries: true });
+  });
+
+  it("fills in seenHowTo for a legacy save that predates it", () => {
+    localStorage.setItem("geo-racer:settings:v1", JSON.stringify({ selectedSkin: "plane-jet" }));
+    expect(loadSettings().seenHowTo).toEqual({});
+  });
 });
 
 describe("recordLearned", () => {

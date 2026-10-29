@@ -1,4 +1,4 @@
-const CACHE_VERSION = "geo-racer-v4";
+const CACHE_VERSION = "geo-racer-v5";
 const BASE = self.registration ? new URL(self.registration.scope).pathname : "/";
 
 const PRECACHE_URLS = [

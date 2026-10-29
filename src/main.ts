@@ -1,12 +1,21 @@
 import "./style.css";
 import { GlobeScene } from "./render/globe";
 import { el, clear, chip } from "./ui/dom";
-import { getTargets, countryNameForTargetId, MODES, type Mode } from "./game/targets";
+import {
+  getTargets,
+  countryNameForTargetId,
+  cluesForTarget,
+  factDetailsForTarget,
+  memoryTipForTarget,
+  MODES,
+  type Mode,
+} from "./game/targets";
+import { HOW_TO, type HowToKey } from "./game/howTo";
 import { buildRoundQueue, type QuestionFilter } from "./game/questions";
 import { buildDailyChallenge, dateKey, isNextDay } from "./game/daily";
 import { mulberry32, shuffle } from "./game/rng";
 import { greatCircleDistanceKm } from "./game/geo";
-import { scoreAnswer, type AnswerScore, type Rating } from "./game/scoring";
+import { scoreAnswer, clueMultiplier, type AnswerScore, type Rating } from "./game/scoring";
 import { countryContainsPoint } from "./game/countryHitTest";
 import { stateContainsPoint } from "./game/stateHitTest";
 import { loadWorldGeo, loadStatesGeo, type GeoCollection } from "./data/worldGeo";
@@ -70,6 +79,7 @@ import {
   badgeSvgFor,
   buildReverseChoices,
   buildSportsRoundQueue,
+  memoryTipForTeam,
   pointsForReverseGuess,
   scoreSportsGuess,
   SPORTS_ROUND_LENGTH,
@@ -172,6 +182,8 @@ interface RoundState {
   /** Set when this round is a World Tour campaign level, so results can award stars. */
   campaignLevelId: string | null;
   ratings: Rating[];
+  /** Progressive hints revealed for the current question; resets every question. More hints = lower clueMultiplier. */
+  cluesRevealed: number;
 }
 
 interface TimeAttackState {
@@ -243,7 +255,7 @@ class GeoRacerApp {
   private pendingSportsLeague: LeagueFilter = "MLB";
   private pendingSportsKind: SportsRoundKind = "find";
   private lastSportsResult: { team: SportsTeam; kind: SportsRoundKind; score: AnswerScore | null; points: number; correct: boolean } | null = null;
-  private lastResult: { target: GeoTarget; score: AnswerScore; mode: Mode } | null = null;
+  private lastResult: { target: GeoTarget; score: AnswerScore; mode: Mode; pointsAwarded: number; cluesRevealed: number } | null = null;
   private raceLastResult: { target: GeoTarget; scores: [AnswerScore, AnswerScore] } | null = null;
   private activeTapHandler: ((lat: number, lon: number) => void) | null = null;
   private achievementToastRoot: HTMLElement;
@@ -448,6 +460,57 @@ class GeoRacerApp {
     this.screen = screen;
   }
 
+  // ---------- HOW TO PLAY ----------
+  /** Shows a dismissible "How to play" card for `key` as a body-level overlay, independent of the current screen/timers. */
+  private showHowTo(key: HowToKey, onClose?: () => void): void {
+    const content = HOW_TO[key];
+    const overlay = el("div", {
+      class: "howto-overlay",
+      onClick: (e: MouseEvent) => {
+        if (e.target === overlay) close();
+      },
+    }, [
+      el("div", { class: "howto-card" }, [
+        el("div", { style: "font-size:2.4rem; line-height:1;" }, [content.icon]),
+        el("h3", {}, [content.title]),
+        el("ol", { class: "howto-steps" }, content.steps.map((s, i) => el("li", {}, [
+          el("span", { class: "howto-step-num" }, [String(i + 1)]),
+          el("span", {}, [s]),
+        ]))),
+        el("button", { class: "btn btn-primary", onClick: () => close() }, [onClose ? "Got it, let's play! →" : "Got it!"]),
+      ]),
+    ]);
+    const close = () => {
+      overlay.remove();
+      onClose?.();
+    };
+    document.body.append(overlay);
+  }
+
+  /** Shows the explainer once (first visit) on a persistent, non-timed screen, then marks it seen. */
+  private maybeAutoShowHowTo(key: HowToKey): void {
+    if (this.settings.seenHowTo[key]) return;
+    this.settings.seenHowTo = { ...this.settings.seenHowTo, [key]: true };
+    saveSettings(this.settings);
+    this.showHowTo(key);
+  }
+
+  /** Gates an activity that jumps straight into timed play: shows the explainer first on a player's very first visit, otherwise starts immediately. */
+  private withHowTo(key: HowToKey, start: () => void): void {
+    if (this.settings.seenHowTo[key]) {
+      start();
+      return;
+    }
+    this.settings.seenHowTo = { ...this.settings.seenHowTo, [key]: true };
+    saveSettings(this.settings);
+    this.showHowTo(key, start);
+  }
+
+  /** A small "?" button that reopens the how-to-play card on demand. */
+  private howToButton(key: HowToKey): HTMLElement {
+    return el("button", { class: "icon-btn howto-btn", "aria-label": "How to play", onClick: () => this.showHowTo(key) }, ["❓"]);
+  }
+
   // ---------- HOME ----------
   private renderHome(): void {
     this.setScreen("home");
@@ -471,10 +534,10 @@ class GeoRacerApp {
         el("div", { class: "small-muted" }, [`${level.xpIntoLevel} / ${level.xpForNextLevel} XP to level ${level.level + 1}`]),
       ]),
       el("button", { class: "btn btn-primary", onClick: () => this.renderModeSelect() }, ["✈️ Play"]),
-      el("button", { class: "btn btn-accent", onClick: () => this.startDaily() }, ["\u{1F31F} Daily Challenge"]),
+      el("button", { class: "btn btn-accent", onClick: () => this.withHowTo("daily", () => this.startDaily()) }, ["\u{1F31F} Daily Challenge"]),
       el("button", { class: "btn", onClick: () => this.renderWorldTour() }, ["\u{1F30E} World Tour"]),
-      el("button", { class: "btn", onClick: () => this.startTimeAttack() }, ["⏱️ Time Attack"]),
-      el("button", { class: "btn", onClick: () => this.startDetective() }, ["\u{1F575}️ Globe Detective"]),
+      el("button", { class: "btn", onClick: () => this.withHowTo("timeAttack", () => this.startTimeAttack()) }, ["⏱️ Time Attack"]),
+      el("button", { class: "btn", onClick: () => this.withHowTo("detective", () => this.startDetective()) }, ["\u{1F575}️ Globe Detective"]),
       el("button", { class: "btn", onClick: () => this.renderSportsSetup() }, ["\u{26BE} Sports Map"]),
       el("button", { class: "btn", onClick: () => this.renderRaceSetup() }, ["\u{1F3C1} 2-Player Race"]),
       el("button", { class: "btn", onClick: () => this.renderProfiles() }, ["\u{1F46A} Family & Profiles"]),
@@ -510,6 +573,8 @@ class GeoRacerApp {
   private renderDifficultySelect(): void {
     this.setScreen("difficultySelect");
     const regionsSelected = new Set(this.pendingRegions);
+    const howToKey = this.pendingMode as HowToKey;
+    this.maybeAutoShowHowTo(howToKey);
 
     const render = () => {
       const diffRow = el("div", { class: "chip-row" }, DIFFICULTIES.map((d) =>
@@ -529,7 +594,10 @@ class GeoRacerApp {
       ));
 
       const panel = el("div", { class: "screen-center" }, [
-        el("h2", {}, ["Difficulty"]),
+        el("div", { style: "display:flex; align-items:center; justify-content:center; gap:8px;" }, [
+          el("h2", { style: "margin:0;" }, ["Difficulty"]),
+          this.howToButton(howToKey),
+        ]),
         diffRow,
         el("div", { class: "small-muted" }, ["Regions (optional filter)"]),
         regionRow,
@@ -579,6 +647,7 @@ class GeoRacerApp {
       tickHandle: null,
       campaignLevelId: null,
       ratings: [],
+      cluesRevealed: 0,
     };
     this.playCurrentQuestion();
   }
@@ -605,6 +674,7 @@ class GeoRacerApp {
       tickHandle: null,
       campaignLevelId: null,
       ratings: [],
+      cluesRevealed: 0,
     };
     this.playCurrentQuestion();
   }
@@ -628,6 +698,7 @@ class GeoRacerApp {
       tickHandle: null,
       campaignLevelId: level.id,
       ratings: [],
+      cluesRevealed: 0,
     };
     this.playCurrentQuestion();
   }
@@ -640,6 +711,8 @@ class GeoRacerApp {
 
     const target = this.round.queue[this.round.index];
     this.round.questionStart = performance.now();
+    this.round.cluesRevealed = 0;
+    const clues = cluesForTarget(this.round.mode, target.id);
 
     const promptBanner = target.promptImage
       ? el("div", { class: "prompt-banner prompt-banner-flag" }, [
@@ -647,6 +720,12 @@ class GeoRacerApp {
           el("div", {}, [target.prompt]),
         ])
       : el("div", { class: "prompt-banner" }, [target.prompt]);
+    const clueListEl = el("ul", { class: "clue-list" }, []);
+    const updateClueList = () => {
+      clear(clueListEl);
+      clues.slice(0, this.round!.cluesRevealed).forEach((c) => clueListEl.append(el("li", {}, [c])));
+    };
+    updateClueList();
     const scorePill = el("div", { class: "pill" }, [`Score ${this.round.score}`]);
     const streakPill = el("div", { class: `pill ${this.round.streak > 0 ? "combo-pill" : ""}` }, [
       this.round.streak > 0 ? `\u{1F525} x${this.round.streak}` : "No streak",
@@ -655,15 +734,27 @@ class GeoRacerApp {
 
     const hudTop = el("div", { class: "hud-top" }, [
       quitBtn,
-      promptBanner,
+      el("div", { style: "display:flex; flex-direction:column; gap:6px; flex:1; align-items:center;" }, [promptBanner, clueListEl]),
       el("div", { class: "hud-stats" }, [scorePill, streakPill]),
     ]);
 
     const timerFill = el("div", { class: "timer-bar-fill", style: "width:100%;" });
     const timerTrack = el("div", { class: "timer-bar-track" }, [timerFill]);
 
+    const hintBtn = el("button", {
+      class: "btn hint-btn",
+      style: "pointer-events:auto; width:auto; margin:0; padding:8px 16px;",
+      onClick: () => {
+        if (!this.round || this.round.cluesRevealed >= clues.length) return;
+        this.round.cluesRevealed += 1;
+        updateClueList();
+        if (this.round.cluesRevealed >= clues.length) hintBtn.setAttribute("disabled", "true");
+      },
+    }, [clues.length > 0 ? "\u{1F4A1} Hint" : ""]);
+
     const progress = el("div", { class: "hud-bottom" }, [
       el("div", { class: "pill" }, [`Q${this.round.index + 1} / ${this.round.queue.length}`]),
+      clues.length > 0 ? hintBtn : el("div"),
     ]);
 
     clear(this.uiContent);
@@ -733,10 +824,12 @@ class GeoRacerApp {
     const difficulty = target.difficulty;
     const result = scoreAnswer(distanceKm, elapsedMs, difficulty, this.round.streak);
     this.round.ratings.push(result.rating);
+    const cluesRevealed = this.round.cluesRevealed;
+    const pointsAwarded = Math.round(result.totalPoints * clueMultiplier(cluesRevealed));
 
     this.round.streak = result.rating === "miss" ? 0 : this.round.streak + 1;
-    this.round.score += result.totalPoints;
-    this.round.xpEarned += xpForAnswer(result.totalPoints, result.rating);
+    this.round.score += pointsAwarded;
+    this.round.xpEarned += xpForAnswer(pointsAwarded, result.rating);
     this.save.bestStreak = Math.max(this.save.bestStreak, this.round.streak);
     if (result.rating === "perfect") this.save.perfectCount += 1;
     else if (result.rating === "great") this.save.greatCount += 1;
@@ -756,7 +849,7 @@ class GeoRacerApp {
     this.playRatingSfx(result.rating, this.round.streak);
     this.globe.flyTo(target.lat, target.lon, 1.7);
 
-    this.lastResult = { target, score: result, mode: this.round.mode };
+    this.lastResult = { target, score: result, mode: this.round.mode, pointsAwarded, cluesRevealed };
     window.setTimeout(() => this.renderRoundResult(), 650);
   }
 
@@ -772,15 +865,25 @@ class GeoRacerApp {
   private renderRoundResult(): void {
     if (!this.round || !this.lastResult) return;
     this.setScreen("roundResult");
-    const { target, score } = this.lastResult;
+    const { target, score, mode, pointsAwarded, cluesRevealed } = this.lastResult;
+    const details = factDetailsForTarget(mode, target.id);
+    const memoryTip = score.rating === "miss" ? memoryTipForTarget(mode, target.id) : null;
 
     const panel = el("div", { class: "result-card" }, [
       el("div", { class: `rating-badge rating-${score.rating}` }, [score.rating.toUpperCase()]),
-      el("div", { class: "score-line" }, [`+${score.totalPoints}`]),
+      el("div", { class: "score-line" }, [`+${pointsAwarded}`]),
       el("div", { class: "row-stat" }, [el("span", {}, ["Distance"]), el("span", {}, [`${Math.round(score.distanceKm)} km`])]),
       el("div", { class: "row-stat" }, [el("span", {}, ["Time bonus"]), el("span", {}, [`+${score.timeBonus}`])]),
       el("div", { class: "row-stat" }, [el("span", {}, ["Combo"]), el("span", {}, [`x${score.comboMultiplier.toFixed(2)}`])]),
-      el("div", { class: "fact-card" }, [el("strong", {}, [target.name]), el("div", {}, [target.fact])]),
+      cluesRevealed > 0
+        ? el("div", { class: "row-stat" }, [el("span", {}, ["Hint penalty"]), el("span", {}, [`x${clueMultiplier(cluesRevealed).toFixed(2)}`])])
+        : el("div"),
+      el("div", { class: "fact-card" }, [
+        el("strong", {}, [target.name]),
+        el("div", {}, [target.fact]),
+        ...details.map((d) => el("div", { class: "teach-line" }, [d])),
+        memoryTip ? el("div", { class: "teach-line teach-tip" }, [memoryTip]) : el("div"),
+      ]),
       el("button", {
         class: "btn btn-primary",
         onClick: () => this.nextQuestion(),
@@ -894,6 +997,7 @@ class GeoRacerApp {
     this.setScreen("worldTour");
     this.globe.setAutoRotate(true);
     this.globe.clearPins();
+    this.maybeAutoShowHowTo("worldTour");
     const campaign = buildCampaign();
     const rows = CAMPAIGN_REGIONS.map((region) => {
       const levels = campaign.filter((l) => l.region === region);
@@ -912,7 +1016,10 @@ class GeoRacerApp {
       ]);
     });
     const panel = el("div", { class: "screen-center" }, [
-      el("h2", {}, ["\u{1F30E} World Tour"]),
+      el("div", { style: "display:flex; align-items:center; justify-content:center; gap:8px;" }, [
+        el("h2", { style: "margin:0;" }, ["\u{1F30E} World Tour"]),
+        this.howToButton("worldTour"),
+      ]),
       el("p", { class: "small-muted" }, ["Clear every level's boss round to unlock the next continent."]),
       ...rows,
       el("button", { class: "btn", onClick: () => this.renderHome() }, ["← Back"]),
@@ -1279,6 +1386,7 @@ class GeoRacerApp {
     this.globe.clearPins();
     let league = this.pendingSportsLeague;
     let kind = this.pendingSportsKind;
+    this.maybeAutoShowHowTo(kind === "find" ? "sportsFind" : "sportsName");
 
     const render = () => {
       const leagueRow = el("div", { class: "chip-row" }, LEAGUE_CHIPS.map((c) =>
@@ -1296,7 +1404,10 @@ class GeoRacerApp {
         })
       ));
       const panel = el("div", { class: "screen-center" }, [
-        el("h2", {}, ["\u{26BE} Sports Map \u{1F3C0}"]),
+        el("div", { style: "display:flex; align-items:center; justify-content:center; gap:8px;" }, [
+          el("h2", { style: "margin:0;" }, ["\u{26BE} Sports Map \u{1F3C0}"]),
+          this.howToButton(kind === "find" ? "sportsFind" : "sportsName"),
+        ]),
         el("p", { class: "small-muted" }, ["Pick a league, then find each team's home city on the globe — zoomed in on North America."]),
         el("div", { class: "small-muted" }, ["League"]),
         leagueRow,
@@ -1493,8 +1604,10 @@ class GeoRacerApp {
           el("div", { class: "sports-badge-img-sm", html: badgeSvgFor(team) }),
           el("strong", {}, [team.name]),
         ]),
-        el("div", {}, [`${team.venue} • ${team.city}`]),
-        el("div", {}, [team.fact]),
+        el("div", { class: "teach-line" }, [`Home: ${team.city}`]),
+        el("div", { class: "teach-line" }, [team.venue]),
+        el("div", { class: "teach-line" }, [team.fact]),
+        !correct ? el("div", { class: "teach-line teach-tip" }, [memoryTipForTeam(team)]) : el("div"),
         team.isHometown ? el("div", { class: "hometown-ribbon" }, ["\u{1F3E0} Hometown Team!"]) : el("div"),
       ]),
       el("button", {
@@ -1672,12 +1785,16 @@ class GeoRacerApp {
   // ---------- RACE MODE ----------
   private renderRaceSetup(): void {
     this.setScreen("raceSetup");
+    this.maybeAutoShowHowTo("race");
     let name1 = "Player 1";
     let name2 = "Player 2";
     const input1 = el("input", { class: "btn", style: "text-align:center;", value: name1 }) as HTMLInputElement;
     const input2 = el("input", { class: "btn", style: "text-align:center;", value: name2 }) as HTMLInputElement;
     const panel = el("div", { class: "screen-center" }, [
-      el("h2", {}, ["2-Player Hot-Seat Race"]),
+      el("div", { style: "display:flex; align-items:center; justify-content:center; gap:8px;" }, [
+        el("h2", { style: "margin:0;" }, ["2-Player Hot-Seat Race"]),
+        this.howToButton("race"),
+      ]),
       el("p", { class: "small-muted" }, ["Pass the device between turns. Same questions, best score wins!"]),
       input1,
       input2,
@@ -1777,7 +1894,11 @@ class GeoRacerApp {
     const panel = el("div", { class: "result-card" }, [
       el("div", { class: `rating-badge rating-${score.rating}` }, [score.rating.toUpperCase()]),
       el("div", { class: "score-line" }, [`+${score.totalPoints}`]),
-      el("div", { class: "fact-card" }, [el("strong", {}, [target.name]), el("div", {}, [target.fact])]),
+      el("div", { class: "fact-card" }, [
+        el("strong", {}, [target.name]),
+        el("div", {}, [target.fact]),
+        ...factDetailsForTarget("countries", target.id).map((d) => el("div", { class: "teach-line" }, [d])),
+      ]),
       el("div", { class: "race-score-row" }, [
         el("div", { class: "race-player" }, [
           el("div", { class: "player-name" }, [this.race.names[0]]),

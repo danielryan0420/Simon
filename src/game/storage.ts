@@ -27,6 +27,8 @@ export interface AppSettings {
   selectedTheme: string;
   accessibility: AccessibilitySettings;
   hasSeenTutorial: boolean;
+  /** Tracks which "How to play" explainers have already been auto-shown once, keyed by HowToKey. */
+  seenHowTo: Record<string, boolean>;
 }
 
 /** ISO 8601 week key, e.g. "2026-W43", so the family leaderboard resets every Monday. */
@@ -114,6 +116,7 @@ export function defaultSettings(): AppSettings {
     selectedTheme: "theme-blue",
     accessibility: { largeText: false, colorBlindMode: false, reducedMotion: false },
     hasSeenTutorial: false,
+    seenHowTo: {},
   };
 }
 
@@ -154,6 +157,7 @@ export function loadSettings(): AppSettings {
       ...defaultSettings(),
       ...parsed,
       accessibility: { ...defaultSettings().accessibility, ...parsed.accessibility },
+      seenHowTo: { ...defaultSettings().seenHowTo, ...parsed.seenHowTo },
     };
   } catch {
     return defaultSettings();

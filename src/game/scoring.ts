@@ -39,6 +39,11 @@ export function timeBonus(timeMs: number): number {
   return Math.round(200 * (1 - (seconds - 2) / 8));
 }
 
+/** Points multiplier for revealing progressive hints before answering — fewer clues used means more points, mirroring Globe Detective. */
+export function clueMultiplier(cluesRevealed: number): number {
+  return Math.max(0.4, 1 - cluesRevealed * 0.15);
+}
+
 export interface AnswerScore {
   distanceKm: number;
   rating: Rating;

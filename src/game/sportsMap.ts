@@ -53,3 +53,8 @@ export function badgeSvgFor(team: SportsTeam): string {
 
 export const MLB_TEAM_IDS = MLB_TEAMS.map((t) => t.id);
 export const NBA_TEAM_IDS = NBA_TEAMS.map((t) => t.id);
+
+/** A short memory aid shown on a wrong guess, built from the team's own city field. */
+export function memoryTipForTeam(team: SportsTeam): string {
+  return `Tip: the ${team.nickname} play in ${team.city}.`;
+}

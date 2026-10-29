@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { comboMultiplier, rateDistance, scoreAnswer, timeBonus } from "../src/game/scoring";
+import { clueMultiplier, comboMultiplier, rateDistance, scoreAnswer, timeBonus } from "../src/game/scoring";
 
 describe("rateDistance", () => {
   it("rates close answers as perfect", () => {
@@ -82,5 +82,20 @@ describe("scoreAnswer", () => {
     const low = scoreAnswer(100, 3000, "pilot", 0);
     const high = scoreAnswer(100, 3000, "pilot", 10);
     expect(high.totalPoints).toBeGreaterThan(low.totalPoints);
+  });
+});
+
+describe("clueMultiplier", () => {
+  it("is 1 when no hints were used", () => {
+    expect(clueMultiplier(0)).toBe(1);
+  });
+  it("strictly decreases with each hint revealed", () => {
+    expect(clueMultiplier(1)).toBeLessThan(clueMultiplier(0));
+    expect(clueMultiplier(2)).toBeLessThan(clueMultiplier(1));
+    expect(clueMultiplier(3)).toBeLessThan(clueMultiplier(2));
+  });
+  it("never drops below the floor, even with many hints", () => {
+    expect(clueMultiplier(10)).toBeGreaterThanOrEqual(0.4);
+    expect(clueMultiplier(100)).toBe(0.4);
   });
 });
